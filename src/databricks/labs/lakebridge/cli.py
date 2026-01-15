@@ -1262,6 +1262,228 @@ def agent_migrate(
         raise SystemExit(f"Migration failed: {result.error}")
 
 
+# =============================================================================
+# DLT COMMANDS - Delta Live Tables deployment
+# =============================================================================
+
+
+@lakebridge.command
+def dlt_generate(
+    *,
+    w: WorkspaceClient,
+    input_dir: str,
+    output_file: str,
+    catalog: str | None = None,
+    schema: str | None = None,
+    notebook_name: str = "migration_pipeline",
+    description: str = "",
+) -> None:
+    """Generate a DLT notebook from transpiled SQL files.
+    
+    Converts SQL files to Databricks Delta Live Tables format.
+    """
+    ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "dlt-generate")
+    del w
+    
+    from pathlib import Path
+    from databricks.labs.lakebridge.dlt import SQLToDLTConverter
+    
+    converter = SQLToDLTConverter(
+        catalog=catalog,
+        schema=schema,
+        source_system="mssql",
+    )
+    
+    result = converter.convert_directory(
+        input_dir=input_dir,
+        notebook_name=notebook_name,
+        description=description or f"DLT pipeline generated from {input_dir}",
+    )
+    
+    if result.success:
+        output_path = Path(output_file)
+        result.notebook.save(output_path)
+        logger.info(f"✅ Generated DLT notebook: {output_file}")
+        logger.info(f"   Tables: {len(result.notebook.tables)}")
+        logger.info(f"   Views: {len(result.notebook.views)}")
+        logger.info(f"   Streams: {len(result.notebook.streams)}")
+        print(json.dumps({
+            "success": True,
+            "output_file": str(output_path),
+            "table_count": result.table_count,
+        }))
+    else:
+        for error in result.conversion_errors:
+            logger.error(f"❌ {error}")
+        raise SystemExit("DLT generation failed")
+
+
+@lakebridge.command
+def dlt_deploy(
+    *,
+    w: WorkspaceClient,
+    notebook_path: str,
+    workspace_path: str,
+    pipeline_name: str,
+    target_catalog: str | None = None,
+    target_schema: str | None = None,
+    development: bool = True,
+    serverless: bool = False,
+) -> None:
+    """Deploy a DLT notebook to Databricks and create a pipeline.
+    
+    Uploads the notebook and creates a DLT pipeline.
+    """
+    ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "dlt-deploy")
+    
+    from databricks.labs.lakebridge.dlt import DLTDeployer, DLTPipelineConfig
+    
+    deployer = DLTDeployer(w)
+    
+    # Upload notebook
+    deployer.upload_notebook(notebook_path, workspace_path)
+    logger.info(f"✅ Uploaded notebook to {workspace_path}")
+    
+    # Create pipeline config
+    config = DLTPipelineConfig(
+        name=pipeline_name,
+        notebook_path=workspace_path,
+        target_catalog=target_catalog,
+        target_schema=target_schema,
+        development=development,
+        serverless=serverless,
+    )
+    
+    # Check if pipeline exists
+    existing = deployer.list_pipelines(filter_name=pipeline_name)
+    
+    if existing:
+        pipeline_id = existing[0]["pipeline_id"]
+        deployer.update_pipeline(pipeline_id, config)
+        logger.info(f"✅ Updated existing pipeline: {pipeline_id}")
+    else:
+        pipeline_id = deployer.create_pipeline(config)
+        logger.info(f"✅ Created new pipeline: {pipeline_id}")
+    
+    print(json.dumps({
+        "success": True,
+        "pipeline_id": pipeline_id,
+        "pipeline_name": pipeline_name,
+        "workspace_path": workspace_path,
+    }))
+
+
+@lakebridge.command
+def dlt_run(
+    *,
+    w: WorkspaceClient,
+    pipeline_id: str,
+    full_refresh: bool = False,
+    wait: bool = True,
+    timeout: int = 3600,
+) -> None:
+    """Run a DLT pipeline.
+    
+    Starts a pipeline update and optionally waits for completion.
+    """
+    ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "dlt-run")
+    
+    from databricks.labs.lakebridge.dlt import DLTDeployer
+    
+    deployer = DLTDeployer(w)
+    
+    logger.info(f"Starting pipeline: {pipeline_id}")
+    
+    result = deployer.run_pipeline(
+        pipeline_id=pipeline_id,
+        full_refresh=full_refresh,
+        wait=wait,
+        timeout_seconds=timeout,
+    )
+    
+    if result.success:
+        logger.info(f"✅ Pipeline completed successfully in {result.duration_seconds:.1f}s")
+        print(json.dumps({
+            "success": True,
+            "pipeline_id": result.pipeline_id,
+            "update_id": result.update_id,
+            "state": result.state.value,
+            "duration_seconds": result.duration_seconds,
+        }))
+    else:
+        logger.error(f"❌ Pipeline failed: {result.error}")
+        print(json.dumps({
+            "success": False,
+            "pipeline_id": result.pipeline_id,
+            "update_id": result.update_id,
+            "state": result.state.value,
+            "error": result.error,
+            "duration_seconds": result.duration_seconds,
+        }))
+        raise SystemExit(f"Pipeline failed: {result.error}")
+
+
+@lakebridge.command
+def dlt_list(
+    *,
+    w: WorkspaceClient,
+    filter_name: str | None = None,
+) -> None:
+    """List DLT pipelines in the workspace.
+    
+    Shows all pipelines or filters by name.
+    """
+    ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "dlt-list")
+    
+    from databricks.labs.lakebridge.dlt import DLTDeployer
+    
+    deployer = DLTDeployer(w)
+    pipelines = deployer.list_pipelines(filter_name=filter_name)
+    
+    if not pipelines:
+        logger.info("No pipelines found")
+        print(json.dumps({"pipelines": []}))
+        return
+    
+    logger.info(f"Found {len(pipelines)} pipeline(s):")
+    for p in pipelines:
+        state_emoji = "🟢" if p["state"] == "IDLE" else "🔵" if p["state"] == "RUNNING" else "⚪"
+        logger.info(f"  {state_emoji} {p['name']} ({p['pipeline_id']})")
+    
+    print(json.dumps({"pipelines": pipelines}))
+
+
+@lakebridge.command
+def dlt_status(
+    *,
+    w: WorkspaceClient,
+    pipeline_id: str,
+) -> None:
+    """Get the status of a DLT pipeline.
+    
+    Shows current state and recent updates.
+    """
+    ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "dlt-status")
+    
+    from databricks.labs.lakebridge.dlt import DLTDeployer
+    
+    deployer = DLTDeployer(w)
+    state = deployer.get_pipeline_state(pipeline_id)
+    
+    state_emoji = "🟢" if state.value == "IDLE" else "🔵" if state.value == "RUNNING" else "⚪"
+    logger.info(f"Pipeline {pipeline_id}: {state_emoji} {state.value}")
+    
+    print(json.dumps({
+        "pipeline_id": pipeline_id,
+        "state": state.value,
+    }))
+
+
 if __name__ == "__main__":
     app = lakebridge
     logger = app.get_logger()
