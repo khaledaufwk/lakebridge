@@ -75,8 +75,14 @@ class MSSQLConnector(_BaseConnector):
 
         query_params = {
             "driver": self.config['driver'],
-            "loginTimeout": "30",
+            "loginTimeout": str(self.config.get('loginTimeout', 30)),
         }
+
+        # Azure SQL Server encryption settings
+        if self.config.get('encrypt', False):
+            query_params["Encrypt"] = "yes"
+        if 'trustServerCertificate' in self.config:
+            query_params["TrustServerCertificate"] = "yes" if self.config['trustServerCertificate'] else "no"
 
         if auth_type == "ad_passwd_authentication":
             query_params = {

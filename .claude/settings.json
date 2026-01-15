@@ -1,0 +1,27 @@
+{
+  "commands": {
+    "enabled": true,
+    "directories": [".claude/commands"]
+  },
+  "skills": {
+    "enabled": false
+  },
+  "hooks": {
+    "enabled": false
+  },
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Edit",
+      "Bash",
+      "Glob",
+      "Grep",
+      "Task",
+      "TodoWrite",
+      "Skill"
+    ],
+    "deny": []
+  },
+  "model": "claude-opus-4-5-20251101"
+}

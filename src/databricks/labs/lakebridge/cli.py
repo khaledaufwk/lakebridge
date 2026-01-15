@@ -1008,6 +1008,260 @@ def create_profiler_dashboard(
     ctx.dashboard_manager.create_profiler_summary_dashboard(source_tech, catalog_name, schema_name)
 
 
+# =============================================================================
+# AGENT COMMANDS - AI-powered migration workflows
+# =============================================================================
+
+
+@lakebridge.command
+def agent_plan(
+    *,
+    w: WorkspaceClient,
+    prompt: str,
+    working_dir: str = ".",
+    model: str = "opus",
+    verbose: bool = False,
+) -> None:
+    """[EXPERIMENTAL] Creates an AI-generated implementation plan based on user requirements.
+    
+    Uses Claude to analyze your prompt and create a detailed plan saved to specs/.
+    """
+    ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "agent-plan")
+    del w
+    
+    from databricks.labs.lakebridge.agent import AgentRunner
+    
+    runner = AgentRunner(
+        working_dir=working_dir,
+        model=f"claude-{model}-4-5-20251101" if model in ("opus", "sonnet", "haiku") else model,
+        verbose=verbose,
+    )
+    
+    result = runner.plan_sync(prompt)
+    
+    if result.success:
+        logger.info(f"✅ Plan created successfully: {result.plan_path}")
+        print(json.dumps({
+            "success": True,
+            "plan_path": result.plan_path,
+            "session_id": result.session_id,
+        }))
+    else:
+        logger.error(f"❌ Plan failed: {result.error}")
+        raise SystemExit(f"Plan creation failed: {result.error}")
+
+
+@lakebridge.command
+def agent_build(
+    *,
+    w: WorkspaceClient,
+    plan_path: str,
+    working_dir: str = ".",
+    model: str = "opus",
+    verbose: bool = False,
+) -> None:
+    """[EXPERIMENTAL] Implements a plan using AI agent.
+    
+    Reads the plan file and implements it top-to-bottom.
+    """
+    ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "agent-build")
+    del w
+    
+    from databricks.labs.lakebridge.agent import AgentRunner
+    
+    runner = AgentRunner(
+        working_dir=working_dir,
+        model=f"claude-{model}-4-5-20251101" if model in ("opus", "sonnet", "haiku") else model,
+        verbose=verbose,
+    )
+    
+    result = runner.build_sync(plan_path)
+    
+    if result.success:
+        logger.info("✅ Build completed successfully")
+        print(json.dumps({
+            "success": True,
+            "session_id": result.session_id,
+        }))
+    else:
+        logger.error(f"❌ Build failed: {result.error}")
+        raise SystemExit(f"Build failed: {result.error}")
+
+
+@lakebridge.command
+def agent_review(
+    *,
+    w: WorkspaceClient,
+    prompt: str,
+    plan_path: str,
+    working_dir: str = ".",
+    model: str = "opus",
+    verbose: bool = False,
+) -> None:
+    """[EXPERIMENTAL] Reviews completed work and produces risk-tiered validation reports.
+    
+    Analyzes git diffs and categorizes issues into Blocker/High/Medium/Low risk tiers.
+    """
+    ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "agent-review")
+    del w
+    
+    from databricks.labs.lakebridge.agent import AgentRunner
+    
+    runner = AgentRunner(
+        working_dir=working_dir,
+        review_model=f"claude-{model}-4-5-20251101" if model in ("opus", "sonnet", "haiku") else model,
+        verbose=verbose,
+    )
+    
+    result = runner.review_sync(prompt, plan_path)
+    
+    if result.success:
+        verdict_emoji = "✅" if result.verdict == "PASS" else "⚠️" if result.verdict == "FAIL" else "❓"
+        logger.info(f"{verdict_emoji} Review completed: {result.verdict}")
+        print(json.dumps({
+            "success": True,
+            "verdict": result.verdict,
+            "review_path": result.review_path,
+            "session_id": result.session_id,
+        }))
+    else:
+        logger.error(f"❌ Review failed: {result.error}")
+        raise SystemExit(f"Review failed: {result.error}")
+
+
+@lakebridge.command
+def agent_fix(
+    *,
+    w: WorkspaceClient,
+    prompt: str,
+    plan_path: str,
+    review_path: str,
+    working_dir: str = ".",
+    model: str = "opus",
+    verbose: bool = False,
+) -> None:
+    """[EXPERIMENTAL] Fixes issues identified in a code review report.
+    
+    Reads the review report and implements recommended solutions.
+    """
+    ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "agent-fix")
+    del w
+    
+    from databricks.labs.lakebridge.agent import AgentRunner
+    
+    runner = AgentRunner(
+        working_dir=working_dir,
+        fix_model=f"claude-{model}-4-5-20251101" if model in ("opus", "sonnet", "haiku") else model,
+        verbose=verbose,
+    )
+    
+    result = runner.fix_sync(prompt, plan_path, review_path)
+    
+    if result.success:
+        logger.info("✅ Fix completed successfully")
+        print(json.dumps({
+            "success": True,
+            "session_id": result.session_id,
+        }))
+    else:
+        logger.error(f"❌ Fix failed: {result.error}")
+        raise SystemExit(f"Fix failed: {result.error}")
+
+
+@lakebridge.command
+def agent_question(
+    *,
+    w: WorkspaceClient,
+    question: str,
+    working_dir: str = ".",
+    model: str = "sonnet",
+    verbose: bool = False,
+) -> None:
+    """[EXPERIMENTAL] Answers questions about the codebase without making changes.
+    
+    Read-only analysis of project structure and documentation.
+    """
+    ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "agent-question")
+    del w
+    
+    from databricks.labs.lakebridge.agent import AgentRunner
+    
+    runner = AgentRunner(
+        working_dir=working_dir,
+        question_model=f"claude-{model}-4-5-20251101" if model in ("opus", "sonnet", "haiku") else model,
+        verbose=verbose,
+    )
+    
+    result = runner.question_sync(question)
+    
+    if result.success:
+        print(result.answer)
+    else:
+        logger.error(f"❌ Question failed: {result.error}")
+        raise SystemExit(f"Question failed: {result.error}")
+
+
+@lakebridge.command
+def agent_migrate(
+    *,
+    w: WorkspaceClient,
+    prompt: str,
+    working_dir: str = ".",
+    model: str = "opus",
+    review_model: str | None = None,
+    fix_model: str | None = None,
+    skip_review: bool = False,
+    skip_fix: bool = False,
+    verbose: bool = False,
+) -> None:
+    """[EXPERIMENTAL] Full agent-run migration: plan → build → review → fix.
+    
+    Runs the complete AI Developer Workflow to implement a migration.
+    """
+    ctx = ApplicationContext(w)
+    ctx.add_user_agent_extra("cmd", "agent-migrate")
+    del w
+    
+    from databricks.labs.lakebridge.agent import AgentRunner
+    
+    def resolve_model(m: str) -> str:
+        if m in ("opus", "sonnet", "haiku"):
+            return f"claude-{m}-4-5-20251101"
+        return m
+    
+    runner = AgentRunner(
+        working_dir=working_dir,
+        model=resolve_model(model),
+        review_model=resolve_model(review_model) if review_model else None,
+        fix_model=resolve_model(fix_model) if fix_model else None,
+        verbose=verbose,
+    )
+    
+    result = runner.migrate_sync(
+        prompt=prompt,
+        skip_review=skip_review,
+        skip_fix=skip_fix,
+    )
+    
+    if result.success:
+        verdict_emoji = "✅" if result.verdict == "PASS" else "⚠️" if result.verdict == "FAIL" else "🔧"
+        logger.info(f"{verdict_emoji} Migration completed in {result.duration_seconds:.1f}s")
+        logger.info(f"   Plan: {result.plan_path}")
+        logger.info(f"   Verdict: {result.verdict}")
+        if result.fix_executed:
+            logger.info("   Fix: Applied")
+        
+        print(json.dumps(result.to_dict()))
+    else:
+        logger.error(f"❌ Migration failed: {result.error}")
+        raise SystemExit(f"Migration failed: {result.error}")
+
+
 if __name__ == "__main__":
     app = lakebridge
     logger = app.get_logger()
