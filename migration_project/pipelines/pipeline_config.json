@@ -1,0 +1,214 @@
+{
+  "name": "WakeCapDW_Migration_Pipeline",
+  "catalog": "wakecap_prod",
+  "schema": "migration",
+  "target": "wakecap_prod.migration",
+  "development": true,
+  "continuous": false,
+  "channel": "PREVIEW",
+  "photon": true,
+  "tables": [
+    {
+      "name": "bronze_dbo_Activity",
+      "source_schema": "dbo",
+      "source_table": "Activity"
+    },
+    {
+      "name": "bronze_dbo_Company",
+      "source_schema": "dbo",
+      "source_table": "Company"
+    },
+    {
+      "name": "bronze_dbo_ContactTracingRule",
+      "source_schema": "dbo",
+      "source_table": "ContactTracingRule"
+    },
+    {
+      "name": "bronze_dbo_Crew",
+      "source_schema": "dbo",
+      "source_table": "Crew"
+    },
+    {
+      "name": "bronze_dbo_Crew2",
+      "source_schema": "dbo",
+      "source_table": "Crew2"
+    },
+    {
+      "name": "bronze_dbo_CrewAssignments",
+      "source_schema": "dbo",
+      "source_table": "CrewAssignments"
+    },
+    {
+      "name": "bronze_dbo_Crew_CopyTable_Test",
+      "source_schema": "dbo",
+      "source_table": "Crew_CopyTable_Test"
+    },
+    {
+      "name": "bronze_dbo_Department",
+      "source_schema": "dbo",
+      "source_table": "Department"
+    },
+    {
+      "name": "bronze_dbo_Device",
+      "source_schema": "dbo",
+      "source_table": "Device"
+    },
+    {
+      "name": "bronze_dbo_DeviceAssignments",
+      "source_schema": "dbo",
+      "source_table": "DeviceAssignments"
+    },
+    {
+      "name": "bronze_dbo_ExtSource",
+      "source_schema": "dbo",
+      "source_table": "ExtSource"
+    },
+    {
+      "name": "bronze_dbo_FactObservations",
+      "source_schema": "dbo",
+      "source_table": "FactObservations"
+    },
+    {
+      "name": "bronze_dbo_FactProgress",
+      "source_schema": "dbo",
+      "source_table": "FactProgress"
+    },
+    {
+      "name": "bronze_dbo_FactReportedAttendance",
+      "source_schema": "dbo",
+      "source_table": "FactReportedAttendance"
+    },
+    {
+      "name": "bronze_dbo_FactWeatherObservations",
+      "source_schema": "dbo",
+      "source_table": "FactWeatherObservations"
+    },
+    {
+      "name": "bronze_dbo_FactWorkersContacts",
+      "source_schema": "dbo",
+      "source_table": "FactWorkersContacts"
+    },
+    {
+      "name": "bronze_dbo_FactWorkersHistory",
+      "source_schema": "dbo",
+      "source_table": "FactWorkersHistory"
+    },
+    {
+      "name": "bronze_dbo_FactWorkersShifts",
+      "source_schema": "dbo",
+      "source_table": "FactWorkersShifts"
+    },
+    {
+      "name": "bronze_dbo_FactWorkersShiftsCombined",
+      "source_schema": "dbo",
+      "source_table": "FactWorkersShiftsCombined"
+    },
+    {
+      "name": "bronze_dbo_FactWorkersTasks",
+      "source_schema": "dbo",
+      "source_table": "FactWorkersTasks"
+    },
+    {
+      "name": "bronze_dbo_Floor",
+      "source_schema": "dbo",
+      "source_table": "Floor"
+    },
+    {
+      "name": "bronze_dbo_LocationAssignmentClass",
+      "source_schema": "dbo",
+      "source_table": "LocationAssignmentClass"
+    },
+    {
+      "name": "bronze_dbo_LocationGroup",
+      "source_schema": "dbo",
+      "source_table": "LocationGroup"
+    },
+    {
+      "name": "bronze_dbo_LocationGroupAssignments",
+      "source_schema": "dbo",
+      "source_table": "LocationGroupAssignments"
+    },
+    {
+      "name": "bronze_dbo_ManagerAssignments",
+      "source_schema": "dbo",
+      "source_table": "ManagerAssignments"
+    },
+    {
+      "name": "bronze_dbo_ManagerAssignmentSnapshots",
+      "source_schema": "dbo",
+      "source_table": "ManagerAssignmentSnapshots"
+    },
+    {
+      "name": "bronze_dbo_ObservationClinicViolationStatus",
+      "source_schema": "dbo",
+      "source_table": "ObservationClinicViolationStatus"
+    },
+    {
+      "name": "bronze_dbo_ObservationDiscriminator",
+      "source_schema": "dbo",
+      "source_table": "ObservationDiscriminator"
+    },
+    {
+      "name": "bronze_dbo_ObservationSeverity",
+      "source_schema": "dbo",
+      "source_table": "ObservationSeverity"
+    },
+    {
+      "name": "bronze_dbo_ObservationSource",
+      "source_schema": "dbo",
+      "source_table": "ObservationSource"
+    }
+  ],
+  "views": [
+    {
+      "name": "gold_unknown",
+      "source_schema": "dbo",
+      "source_view": "unknown"
+    },
+    {
+      "name": "gold_vwcrew",
+      "source_schema": "dbo",
+      "source_view": "vwCrew"
+    },
+    {
+      "name": "gold_vwcrewassignments",
+      "source_schema": "dbo",
+      "source_view": "vwCrewAssignments"
+    },
+    {
+      "name": "gold_unknown",
+      "source_schema": "dbo",
+      "source_view": "unknown"
+    },
+    {
+      "name": "gold_vwdeviceassignment_continuous",
+      "source_schema": "dbo",
+      "source_view": "vwDeviceAssignment_Continuous"
+    },
+    {
+      "name": "gold_vwfactreportedattendance",
+      "source_schema": "dbo",
+      "source_view": "vwFactReportedAttendance"
+    },
+    {
+      "name": "gold_unknown",
+      "source_schema": "dbo",
+      "source_view": "unknown"
+    },
+    {
+      "name": "gold_vwfactworkersshiftscombined_ext",
+      "source_schema": "dbo",
+      "source_view": "vwFactWorkersShiftsCombined_Ext"
+    },
+    {
+      "name": "gold_vwfactworkersshiftscombined_ext2",
+      "source_schema": "dbo",
+      "source_view": "vwFactWorkersShiftsCombined_Ext2"
+    },
+    {
+      "name": "gold_vwfactworkersshifts_ext",
+      "source_schema": "dbo",
+      "source_view": "vwFactWorkersShifts_Ext"
+    }
+  ]
+}

@@ -32,6 +32,163 @@ FIX_OUTPUT_DIRECTORY: `app_fix_reports/`
 - If a recommended solution doesn't work, try alternative solutions or document why it couldn't be fixed.
 - Be thorough but efficient—fix issues correctly the first time.
 
+## Migration-Specific Fixes
+
+When fixing SQL Server to Databricks migration issues, use these proven solutions:
+
+### Missing Schema Fix
+```python
+from databricks.sdk import WorkspaceClient
+import yaml
+from pathlib import Path
+
+creds = yaml.safe_load(open(Path.home() / '.databricks/labs/lakebridge/.credentials.yml'))['databricks']
+w = WorkspaceClient(host=creds['host'], token=creds['token'])
+
+catalog = "your_catalog"
+schema = "your_schema"
+
+# Check if schema exists, create if not
+try:
+    w.schemas.get(full_name=f"{catalog}.{schema}")
+    print(f"Schema {catalog}.{schema} exists")
+except Exception:
+    w.schemas.create(name=schema, catalog_name=catalog)
+    print(f"Created schema {catalog}.{schema}")
+```
+
+### Missing Secret Scope Fix
+```python
+from databricks.sdk import WorkspaceClient
+
+w = WorkspaceClient(host=host, token=token)
+scope_name = "migration_secrets"
+
+# Create scope (ignore if exists)
+try:
+    w.secrets.create_scope(scope=scope_name)
+    print(f"Created secret scope: {scope_name}")
+except Exception as e:
+    if "already exists" in str(e):
+        print(f"Secret scope {scope_name} already exists")
+    else:
+        raise
+
+# Add secrets
+secrets_to_add = {
+    "sqlserver_jdbc_url": "jdbc:sqlserver://server:1433;database=db;encrypt=true;trustServerCertificate=false",
+    "sqlserver_user": "username",
+    "sqlserver_password": "password"
+}
+
+for key, value in secrets_to_add.items():
+    w.secrets.put_secret(scope=scope_name, key=key, string_value=value)
+    print(f"Added secret: {key}")
+```
+
+### JDBC Driver Fix
+Add this library to your Databricks cluster:
+- Maven: `com.microsoft.sqlserver:mssql-jdbc:12.4.2.jre11`
+- Or upload JAR: `mssql-jdbc-12.4.2.jre11.jar`
+
+### Firewall Fix
+Add Databricks control plane IPs to SQL Server firewall:
+- For Azure: Enable "Allow Azure services" 
+- For on-prem: Add Databricks NAT Gateway IPs
+- Check: https://docs.databricks.com/administration-guide/cloud-configurations/azure/network-access.html
+
+### Transpilation Error Fixes
+
+**T-SQL to Databricks mappings:**
+```python
+# Common fixes for SQLGlot transpilation issues
+mappings = {
+    # Data types
+    "NVARCHAR(MAX)": "STRING",
+    "VARCHAR(MAX)": "STRING", 
+    "DATETIME": "TIMESTAMP",
+    "DATETIME2": "TIMESTAMP",
+    "BIT": "BOOLEAN",
+    "MONEY": "DECIMAL(19,4)",
+    "UNIQUEIDENTIFIER": "STRING",
+    
+    # Functions
+    "GETDATE()": "CURRENT_TIMESTAMP()",
+    "ISNULL(": "COALESCE(",
+    "LEN(": "LENGTH(",
+    "CHARINDEX(": "LOCATE(",
+    "DATEADD(": "DATE_ADD(",
+    "DATEDIFF(": "DATEDIFF(",
+}
+
+# Apply mappings
+for tsql, databricks in mappings.items():
+    sql = sql.replace(tsql, databricks)
+```
+
+**Convert IDENTITY to Databricks:**
+```sql
+-- T-SQL:
+CREATE TABLE t (id INT IDENTITY(1,1) PRIMARY KEY)
+
+-- Databricks:
+CREATE TABLE t (id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY)
+```
+
+**Convert TOP to LIMIT:**
+```sql
+-- T-SQL:
+SELECT TOP 10 * FROM table
+
+-- Databricks:
+SELECT * FROM table LIMIT 10
+```
+
+### DLT Pipeline Fix (Connection Issues)
+```python
+# If getting JDBC connection errors, verify:
+# 1. Secret values are correct
+# 2. Network allows connection
+# 3. Driver is installed
+
+# Debug JDBC connection in notebook:
+jdbc_url = dbutils.secrets.get("migration_secrets", "sqlserver_jdbc_url")
+user = dbutils.secrets.get("migration_secrets", "sqlserver_user")
+password = dbutils.secrets.get("migration_secrets", "sqlserver_password")
+
+df = (spark.read.format("jdbc")
+    .option("url", jdbc_url)
+    .option("dbtable", "(SELECT 1 AS test) t")
+    .option("user", user)
+    .option("password", password)
+    .option("driver", "com.microsoft.sqlserver.jdbc.SQLServerDriver")
+    .load())
+
+df.show()  # Should show: test=1
+```
+
+### Pipeline State Fix (Stuck/Failed)
+```python
+from databricks.sdk import WorkspaceClient
+
+w = WorkspaceClient(host=host, token=token)
+pipeline_id = "your-pipeline-id"
+
+# Stop any running updates
+try:
+    w.pipelines.stop(pipeline_id=pipeline_id)
+    print("Stopped pipeline")
+except:
+    pass
+
+# Delete and recreate if corrupted
+# w.pipelines.delete(pipeline_id=pipeline_id)
+
+# Start fresh
+update = w.pipelines.start_update(pipeline_id=pipeline_id, full_refresh=True)
+print(f"Started update: {update.update_id}")
+```
+
 ## Workflow
 
 1. **Read the Review Report** - Parse the review at REVIEW_PATH to extract all issues organized by risk tier. Note the file paths, line numbers, and recommended solutions for each issue.

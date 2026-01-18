@@ -31,6 +31,65 @@ REVIEW_OUTPUT_DIRECTORY: `app_review/`
 - Never make assumptions—if you can't verify something through git diff or file inspection, flag it as requiring manual review.
 - Be thorough but concise—engineers need actionable insights, not verbose commentary.
 
+## Migration-Specific Review Checklist
+
+When reviewing SQL Server to Databricks migrations, verify these critical items:
+
+### Pre-Deployment Checklist
+
+**Credentials & Configuration:**
+- [ ] `~/.databricks/labs/lakebridge/.credentials.yml` exists and is properly formatted
+- [ ] SQL Server credentials are valid (test with `python test_connections.py`)
+- [ ] Databricks token has not expired
+- [ ] Target catalog and schema are specified
+
+**Source Analysis:**
+- [ ] All SQL objects extracted (procedures, views, functions, tables)
+- [ ] Complexity indicators documented (CURSOR, DYNAMIC_SQL, SPATIAL)
+- [ ] Manual conversion tasks identified and documented
+- [ ] Assessment report generated
+
+**Transpilation:**
+- [ ] Tables transpiled successfully (should be ~100%)
+- [ ] Views transpiled (check for errors in complex views)
+- [ ] Functions flagged for manual conversion to UDFs
+- [ ] Stored procedures flagged for manual conversion
+- [ ] Data type mappings verified (nvarchar→STRING, datetime→TIMESTAMP)
+
+**DLT Pipeline:**
+- [ ] Bronze layer tables defined for all source tables
+- [ ] Silver layer includes data quality expectations
+- [ ] Gold layer implements business views
+- [ ] Secret scope name is consistent throughout
+- [ ] JDBC driver requirement documented
+
+**Databricks Deployment:**
+- [ ] Secret scope created with all required secrets
+- [ ] Target schema exists in Unity Catalog (CRITICAL!)
+- [ ] Notebook uploaded to correct workspace path
+- [ ] Pipeline created with correct catalog/schema target
+- [ ] Cluster has JDBC driver in libraries
+
+### Common Migration Blockers
+
+| Issue | Detection Method | Resolution |
+|-------|-----------------|------------|
+| Missing schema | Pipeline fails with "schema not found" | Create schema before pipeline run |
+| JDBC driver missing | "No suitable driver" error | Add mssql-jdbc JAR to cluster |
+| Network blocked | Connection timeout | Configure firewall rules |
+| Secret scope missing | "Scope not found" error | Create scope and add secrets |
+| Invalid token | 401 Unauthorized | Refresh Databricks token |
+| Catalog permissions | "Permission denied" | Grant user catalog access |
+| Complex T-SQL not transpiled | Empty or error in output | Manual conversion required |
+
+### Data Quality Checks
+
+- [ ] Row counts match between source and bronze tables
+- [ ] Primary keys are not null (silver layer expectations)
+- [ ] Soft deletes filtered in silver layer
+- [ ] Timestamps added for audit trail
+- [ ] Data types preserved correctly
+
 ## Workflow
 
 1. **Parse the USER_PROMPT** - Extract the description of work that was completed, identify the scope of changes, note any specific requirements or acceptance criteria mentioned, determine what files or modules were likely affected.
@@ -50,6 +109,14 @@ REVIEW_OUTPUT_DIRECTORY: `app_review/`
    - Critical bugs that crash the application
    - Missing required migrations or database schema mismatches
    - Hardcoded production credentials
+   
+   **Migration-Specific Blockers:**
+   - Missing target schema in Unity Catalog
+   - Secret scope not created or missing required secrets
+   - JDBC driver not configured in cluster libraries
+   - SQL Server firewall blocking Databricks access
+   - Expired or invalid Databricks token
+   - Missing catalog permissions for target user
 
    **HIGH RISK (Should Fix Before Merge)**
    - Performance regressions or inefficient algorithms
@@ -169,6 +236,37 @@ Your report must follow this exact structure:
 - [ ] Acceptance Criteria 1: [Status and notes]
 - [ ] Acceptance Criteria 2: [Status and notes]
 - [ ] Validation Commands: [Results of running them]
+
+## Migration-Specific Compliance (if applicable)
+
+### Source Extraction
+- [ ] SQL objects extracted: [X procedures, Y views, Z tables]
+- [ ] Complexity assessment generated
+- [ ] Manual conversion items documented
+
+### Transpilation
+- [ ] Tables transpiled: [X/Y success rate]
+- [ ] Views transpiled: [X/Y success rate]
+- [ ] Error log reviewed
+
+### DLT Pipeline
+- [ ] Bronze layer defined: [X tables]
+- [ ] Silver layer with expectations: [X tables]
+- [ ] Gold layer views: [X views]
+- [ ] Medallion architecture correct
+
+### Databricks Deployment
+- [ ] Secret scope: [scope_name] - [EXISTS/MISSING]
+- [ ] Secrets configured: [X/Y secrets]
+- [ ] Target schema: [catalog.schema] - [EXISTS/MISSING]
+- [ ] Notebook uploaded: [path] - [SUCCESS/FAILED]
+- [ ] Pipeline created: [pipeline_id] - [SUCCESS/FAILED]
+- [ ] Pipeline status: [COMPLETED/RUNNING/FAILED]
+
+### Connectivity Verification
+- [ ] SQL Server connection: [SUCCESS/FAILED]
+- [ ] Databricks connection: [SUCCESS/FAILED]
+- [ ] JDBC from Databricks to SQL: [SUCCESS/FAILED/UNTESTED]
 
 ---
 
