@@ -41,35 +41,62 @@ mssql:
 
 ```bash
 # Set environment variables
-export DATABRICKS_HOST="https://your-workspace.cloud.databricks.com"
+export DATABRICKS_HOST="https://your-workspace.azuredatabricks.net"
 export DATABRICKS_TOKEN="your-personal-access-token"
 
 # Or use Databricks CLI authentication
-databricks auth login --host https://your-workspace.cloud.databricks.com
+databricks auth login --host http://adb-3022397433351638.18.azuredatabricks.net/
 ```
 
 ## Phase 2: Assessment
 
-### 2.1 Profile Source Database
+### 2.1 Extract SQL from Source Database
+
+First, extract stored procedures, views, and functions from your MSSQL database:
 
 ```bash
-databricks labs lakebridge profile \
-  --source-type mssql \
-  --output-dir ./assessment/
-```
+# Create directory for SQL files
+mkdir -p ./source_sql/
 
-This generates:
-- Workload complexity report
-- Table statistics
-- Query patterns analysis
-- TCO estimation
+# Connect to MSSQL and extract objects (using Python)
+python -c "
+from databricks.labs.lakebridge.connections.database_manager import MSSQLConnector
+from sqlalchemy import text
+import os
+
+connector = MSSQLConnector({
+    'database': 'YOUR_DATABASE',
+    'driver': 'ODBC Driver 18 for SQL Server',
+    'server': 'your-server.database.windows.net',
+    'port': 1433,
+    'user': 'YOUR_USERNAME',
+    'password': 'YOUR_PASSWORD',
+    'auth_type': 'sql_authentication',
+    'encrypt': True,
+    'trustServerCertificate': False,
+    'loginTimeout': 30
+})
+
+with connector.engine.connect() as conn:
+    # Extract stored procedures
+    result = conn.execute(text('''
+        SELECT name, OBJECT_DEFINITION(object_id) as definition
+        FROM sys.procedures WHERE OBJECT_DEFINITION(object_id) IS NOT NULL
+    '''))
+    for row in result:
+        with open(f'./source_sql/{row.name}.sql', 'w') as f:
+            f.write(row.definition or '')
+    print('Stored procedures extracted')
+"
+```
 
 ### 2.2 Analyze SQL Code
 
 ```bash
 databricks labs lakebridge analyze \
-  --input-source ./source_sql/ \
-  --output-dir ./assessment/analysis/
+  --source-tech tsql \
+  --source-directory ./source_sql/ \
+  --report-file ./assessment/analysis_report.json
 ```
 
 ## Phase 3: Transpilation
@@ -81,8 +108,9 @@ databricks labs lakebridge transpile \
   --source-dialect tsql \
   --input-source ./source_sql/ \
   --output-folder ./transpiled/ \
-  --catalog migration_catalog \
-  --schema staging
+  --catalog-name migration_catalog \
+  --schema-name staging \
+  --error-file-path ./transpiled/errors.log
 ```
 
 ### 3.2 Review Transpilation Results

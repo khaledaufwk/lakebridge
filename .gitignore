@@ -23,3 +23,8 @@ remorph_transpile/
 .databricks-login.json
 .mypy_cache
 .env
+
+# Migration working directories
+source_sql/
+transpiled/
+assessment/
