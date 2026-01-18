@@ -179,6 +179,88 @@ result = w.pipelines.create(
 | Firewall blocking | Timeout | Add Databricks IPs to firewall |
 | Secret not found | Auth error | Create scope and add secrets |
 | Permissions denied | Access error | Grant catalog access |
+| **NO_TABLES_IN_PIPELINE** | No tables found | Check notebook format, @dlt.table decorators |
+| **WAITING_FOR_RESOURCES** | Stuck waiting | Use `serverless=True` in pipeline create |
+| **AMBIGUOUS_REFERENCE** | Column ambiguous | Use unique column names or explicit aliases |
+| **QuotaExhausted** | VM quota error | Use serverless compute |
+
+### Pipeline Creation - ALWAYS Use Serverless
+
+```python
+from databricks.sdk.service.pipelines import NotebookLibrary, PipelineLibrary
+
+# CRITICAL: Always set serverless=True to avoid Azure VM quota issues
+result = w.pipelines.create(
+    name="Migration_Pipeline",
+    catalog="my_catalog",
+    target="migration",
+    development=True,
+    serverless=True,  # REQUIRED to avoid QuotaExhausted errors
+    libraries=[PipelineLibrary(notebook=NotebookLibrary(path=workspace_path))]
+)
+```
+
+### DLT Notebook Format (CRITICAL)
+
+The notebook MUST follow this exact format for DLT to recognize tables:
+
+```python
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Pipeline Title
+
+# COMMAND ----------
+
+import dlt
+from pyspark.sql.functions import col, current_timestamp
+from pyspark.sql.types import StructType, StructField, LongType, StringType
+
+# COMMAND ----------
+
+@dlt.table(name="bronze_table", comment="Description")
+def bronze_table():
+    # Return a DataFrame
+    return spark.createDataFrame(data, schema)
+
+# COMMAND ----------
+
+@dlt.table(name="silver_table")
+@dlt.expect_or_drop("valid_id", "id IS NOT NULL")
+def silver_table():
+    return dlt.read("bronze_table").withColumn("ingested_at", current_timestamp())
+```
+
+### Avoiding Column Ambiguity in Joins
+
+When joining tables, use unique column names to avoid AMBIGUOUS_REFERENCE errors:
+
+```python
+# WRONG: Both tables have _ingested_at
+@dlt.table(name="silver_worker")
+def silver_worker():
+    return dlt.read("bronze_worker").withColumn("_ingested_at", current_timestamp())
+
+@dlt.table(name="silver_project")
+def silver_project():
+    return dlt.read("bronze_project").withColumn("_ingested_at", current_timestamp())
+
+# This will FAIL:
+def gold_summary():
+    return workers.join(projects, "id").select("_ingested_at")  # Ambiguous!
+
+# CORRECT: Use unique column names
+@dlt.table(name="silver_worker")
+def silver_worker():
+    return dlt.read("bronze_worker").withColumn("worker_ingested_at", current_timestamp())
+
+@dlt.table(name="silver_project")
+def silver_project():
+    return dlt.read("bronze_project").withColumn("project_ingested_at", current_timestamp())
+
+# This works:
+def gold_summary():
+    return workers.join(projects, "id").select(col("worker_ingested_at").alias("ingested_at"))
+```
 
 ### Monitoring Pipeline Execution
 

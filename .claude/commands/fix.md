@@ -189,6 +189,149 @@ update = w.pipelines.start_update(pipeline_id=pipeline_id, full_refresh=True)
 print(f"Started update: {update.update_id}")
 ```
 
+### NO_TABLES_IN_PIPELINE Fix
+This error means DLT can't find any `@dlt.table` decorated functions. Common fixes:
+
+```python
+# 1. Ensure notebook has correct format
+notebook_content = '''# Databricks notebook source
+import dlt
+
+# COMMAND ----------
+
+@dlt.table(name="my_table")
+def my_table():
+    return spark.createDataFrame([(1,)], ["id"])
+'''
+
+# 2. Re-upload with proper format
+import base64
+from databricks.sdk.service.workspace import ImportFormat, Language
+
+content_b64 = base64.b64encode(notebook_content.encode('utf-8')).decode('utf-8')
+w.workspace.import_(
+    path=workspace_path,
+    content=content_b64,
+    format=ImportFormat.SOURCE,
+    language=Language.PYTHON,
+    overwrite=True
+)
+
+# 3. Verify notebook was uploaded as NOTEBOOK type
+status = w.workspace.get_status(workspace_path)
+assert status.object_type.name == 'NOTEBOOK', "Upload failed - not recognized as notebook"
+```
+
+### WAITING_FOR_RESOURCES / QuotaExhausted Fix
+Azure VM quota exhaustion is common. The fix is to use serverless compute:
+
+```python
+from databricks.sdk.service.pipelines import NotebookLibrary, PipelineLibrary
+
+# Delete the old pipeline
+w.pipelines.delete(pipeline_id=old_pipeline_id)
+
+# Recreate with serverless=True
+result = w.pipelines.create(
+    name="Pipeline_Name",
+    catalog="catalog",
+    target="schema",
+    development=True,
+    serverless=True,  # THIS IS THE FIX
+    libraries=[PipelineLibrary(notebook=NotebookLibrary(path=workspace_path))]
+)
+
+# Start the new pipeline
+update = w.pipelines.start_update(pipeline_id=result.pipeline_id, full_refresh=True)
+```
+
+### AMBIGUOUS_REFERENCE Fix
+Column name collision in joins. Fix by using unique column names:
+
+```python
+# Before (BROKEN):
+@dlt.table(name="silver_worker")
+def silver_worker():
+    return dlt.read("bronze_worker").withColumn("_ingested_at", current_timestamp())
+
+@dlt.table(name="silver_project")
+def silver_project():
+    return dlt.read("bronze_project").withColumn("_ingested_at", current_timestamp())
+
+@dlt.table(name="gold_summary")
+def gold_summary():
+    workers = dlt.read("silver_worker")
+    projects = dlt.read("silver_project")
+    return workers.join(projects, "ProjectID").select("_ingested_at")  # FAILS!
+
+# After (FIXED):
+@dlt.table(name="silver_worker")
+def silver_worker():
+    return dlt.read("bronze_worker").withColumn("worker_ingested_at", current_timestamp())
+
+@dlt.table(name="silver_project")
+def silver_project():
+    return dlt.read("bronze_project").withColumn("project_ingested_at", current_timestamp())
+
+@dlt.table(name="gold_summary")
+def gold_summary():
+    workers = dlt.read("silver_worker")
+    projects = dlt.read("silver_project")
+    return workers.join(projects, "ProjectID").select(
+        col("worker_ingested_at").alias("ingested_at")  # Explicit reference
+    )
+```
+
+### Complete Pipeline Fix Workflow
+When a pipeline fails, follow this sequence:
+
+```python
+import yaml
+import base64
+from pathlib import Path
+from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.workspace import ImportFormat, Language
+from databricks.sdk.service.pipelines import NotebookLibrary, PipelineLibrary
+
+# 1. Load credentials
+creds = yaml.safe_load(open(Path.home() / '.databricks/labs/lakebridge/.credentials.yml'))['databricks']
+w = WorkspaceClient(host=creds['host'], token=creds['token'])
+
+# 2. Delete failed pipeline
+try:
+    w.pipelines.delete(pipeline_id=failed_pipeline_id)
+except:
+    pass
+
+# 3. Fix and re-upload notebook
+fixed_notebook = '''# Databricks notebook source
+import dlt
+# ... fixed code ...
+'''
+content_b64 = base64.b64encode(fixed_notebook.encode('utf-8')).decode('utf-8')
+w.workspace.import_(
+    path=workspace_path,
+    content=content_b64,
+    format=ImportFormat.SOURCE,
+    language=Language.PYTHON,
+    overwrite=True
+)
+
+# 4. Create new pipeline with serverless
+result = w.pipelines.create(
+    name="Fixed_Pipeline",
+    catalog="catalog",
+    target="schema",
+    development=True,
+    serverless=True,
+    libraries=[PipelineLibrary(notebook=NotebookLibrary(path=workspace_path))]
+)
+
+# 5. Start and monitor
+update = w.pipelines.start_update(pipeline_id=result.pipeline_id, full_refresh=True)
+print(f"Pipeline: {result.pipeline_id}, Update: {update.update_id}")
+```
+
 ## Workflow
 
 1. **Read the Review Report** - Parse the review at REVIEW_PATH to extract all issues organized by risk tier. Note the file paths, line numbers, and recommended solutions for each issue.

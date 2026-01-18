@@ -81,6 +81,34 @@ When reviewing SQL Server to Databricks migrations, verify these critical items:
 | Invalid token | 401 Unauthorized | Refresh Databricks token |
 | Catalog permissions | "Permission denied" | Grant user catalog access |
 | Complex T-SQL not transpiled | Empty or error in output | Manual conversion required |
+| **NO_TABLES_IN_PIPELINE** | "no tables were found" | Check notebook format and @dlt.table decorators |
+| **WAITING_FOR_RESOURCES** | Stuck in waiting state | Use `serverless=True` in pipeline config |
+| **QuotaExhausted** | VM quota error | Switch to serverless compute |
+| **AMBIGUOUS_REFERENCE** | Column ambiguous error | Use unique column names in silver layer |
+
+### DLT Notebook Format Checklist
+
+- [ ] First line is `# Databricks notebook source`
+- [ ] Uses `# COMMAND ----------` between cells
+- [ ] Has `import dlt` statement
+- [ ] All tables have `@dlt.table(name="...")` decorator
+- [ ] Uploaded with `format=ImportFormat.SOURCE, language=Language.PYTHON`
+- [ ] Verified as `ObjectType.NOTEBOOK` after upload
+
+### Pipeline Configuration Checklist
+
+- [ ] `serverless=True` is set (avoids VM quota issues)
+- [ ] `development=True` for initial testing
+- [ ] Correct `catalog` and `target` (schema) specified
+- [ ] `libraries` uses `PipelineLibrary(notebook=NotebookLibrary(path=...))`
+- [ ] Notebook path starts with `/Workspace/`
+
+### Column Naming Checklist (Avoid AMBIGUOUS_REFERENCE)
+
+- [ ] Bronze layer: Raw column names from source
+- [ ] Silver layer: Use prefixed names for computed columns (e.g., `worker_ingested_at`)
+- [ ] Gold layer: Explicitly reference columns with `col()` and use `.alias()` for final names
+- [ ] No duplicate column names across tables being joined
 
 ### Data Quality Checks
 

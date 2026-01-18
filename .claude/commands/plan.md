@@ -60,6 +60,7 @@ When planning SQL Server to Databricks migrations, incorporate these learnings:
 - **JDBC Driver**: `mssql-jdbc-12.4.2.jre11.jar` must be added to cluster libraries
 - **Network Access**: Databricks IPs must be allowed through SQL Server firewall
 - **Unity Catalog**: Catalog must exist and user needs appropriate permissions
+- **Serverless Compute**: Use `serverless=True` to avoid VM quota issues
 
 ### Common Deployment Issues
 1. Missing target schema → Pipeline fails silently
@@ -67,6 +68,54 @@ When planning SQL Server to Databricks migrations, incorporate these learnings:
 3. Firewall blocking → Timeout errors
 4. Secret scope not found → Authentication errors
 5. Catalog permissions → Access denied errors
+6. **NO_TABLES_IN_PIPELINE** → Notebook format issue, missing @dlt.table decorators
+7. **WAITING_FOR_RESOURCES** → Azure VM quota exhausted, use serverless
+8. **AMBIGUOUS_REFERENCE** → Column name collision in joins, use explicit aliases
+
+### DLT Notebook Format Requirements
+Notebooks must follow this exact format:
+```python
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Pipeline Title
+
+# COMMAND ----------
+
+import dlt
+from pyspark.sql.functions import col, current_timestamp
+
+# COMMAND ----------
+
+@dlt.table(name="table_name", comment="description")
+def table_name():
+    return spark.createDataFrame(...)
+```
+
+### Pipeline Creation Best Practices
+```python
+# Always use serverless to avoid quota issues
+result = w.pipelines.create(
+    name="Migration_Pipeline",
+    catalog="catalog_name",
+    target="schema_name",
+    development=True,
+    serverless=True,  # CRITICAL: Avoids VM quota issues
+    libraries=[PipelineLibrary(notebook=NotebookLibrary(path=workspace_path))]
+)
+```
+
+### Join Column Naming Convention
+When creating silver/gold layers with joins, avoid ambiguous columns:
+```python
+# Silver layer: Use unique column names
+.withColumn("worker_ingested_at", current_timestamp())  # Not "_ingested_at"
+
+# Gold layer: Explicitly select columns
+.select(
+    col("WorkerID"),
+    col("worker_ingested_at").alias("ingested_at")
+)
+```
 
 ## Workflow
 
