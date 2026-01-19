@@ -1,9 +1,14 @@
 {
   "name": "lakebridge-skills",
-  "version": "1.0.0",
-  "description": "SQL Server to Databricks migration skills with plan-build-review-fix workflow orchestration",
+  "version": "1.1.0",
+  "description": "SQL Server to Databricks migration skills with plan-build-review-fix workflow orchestration and Python scripts",
   "author": "Lakebridge",
   "repository": "https://github.com/databrickslabs/lakebridge",
+  "shared": {
+    "name": "lakebridge-shared",
+    "path": "shared",
+    "description": "Shared utilities: credentials, Databricks client, SQL Server client, transpiler"
+  },
   "skills": [
     {
       "name": "lakebridge-workflow",

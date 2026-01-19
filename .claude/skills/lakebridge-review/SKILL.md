@@ -296,3 +296,43 @@ Findings:
 Verdict: FAIL
 Recommended: Run lakebridge-fix skill to address blockers
 ```
+
+## Scripts
+
+This skill includes Python scripts for code analysis:
+
+### analyzer.py
+
+```python
+from scripts.analyzer import CodeAnalyzer, ReviewReport, RiskTier
+
+analyzer = CodeAnalyzer()
+
+# Analyze code content for issues
+issues = analyzer.analyze_content(code, file_path="path/to/file.py")
+
+# Check DLT notebook specifically
+notebook_issues = analyzer.check_dlt_notebook(notebook_content)
+
+# Check migration deployment requirements
+deployment_issues = analyzer.check_migration_deployment(
+    has_schema=True,
+    has_secret_scope=True,
+    has_secrets=True,
+    uses_serverless=False  # Will flag HIGH risk
+)
+
+# Create report
+all_issues = issues + notebook_issues + deployment_issues
+report = analyzer.create_report(
+    issues=all_issues,
+    summary="Found 2 blockers and 3 medium-risk issues",
+    plan_path="specs/migration.md",
+    git_diff_stats="5 files changed, 200 insertions(+), 50 deletions(-)"
+)
+
+# Save report
+filepath = report.save("app_review/")
+print(f"Verdict: {report.verdict}")
+print(f"Blockers: {len(report.blockers)}")
+```

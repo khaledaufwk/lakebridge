@@ -247,3 +247,47 @@ Creates: specs/wakecap-database-migration.md
 - Target: Databricks DLT with medallion architecture
 - Phases: Assessment, Transpilation, Pipeline, Deployment, Validation
 ```
+
+## Scripts
+
+This skill includes Python scripts for plan generation:
+
+### planner.py
+
+```python
+from scripts.planner import PlanGenerator, PlanTemplate, TaskType, Complexity
+
+generator = PlanGenerator()
+
+# Analyze prompt to determine type and complexity
+task_type, complexity = generator.analyze_prompt("Add OAuth authentication")
+# (TaskType.FEATURE, Complexity.MEDIUM)
+
+# Create template
+template = PlanTemplate(
+    task_name="Add OAuth Authentication",
+    task_type=task_type,
+    complexity=complexity,
+    description="Implement OAuth 2.0...",
+    objective="Users can log in via OAuth",
+    tasks=[
+        {"name": "Configure OAuth", "actions": ["Add client ID", "Set callback URL"]},
+        {"name": "Implement Flow", "actions": ["Create login endpoint", "Handle callback"]},
+    ],
+    acceptance_criteria=["Users can log in with Google", "Token refresh works"],
+    validation_commands=[{"command": "npm test", "description": "Run tests"}],
+)
+
+# Generate markdown and save
+markdown = generator.generate(template)
+filepath = generator.save(template, "specs/")
+
+# For migrations, use convenience method
+migration_template = generator.create_migration_template(
+    source_database="WakeCap",
+    source_server="server.database.windows.net",
+    target_catalog="wakecap_prod",
+    target_schema="migration",
+    tables=["Worker", "Project", "Site"],
+)
+```

@@ -396,3 +396,47 @@ Skipped:
 Status: PARTIAL
 Next Steps: Contact Azure admin for firewall configuration
 ```
+
+## Scripts
+
+This skill includes Python scripts for automated fixes:
+
+### fixer.py
+
+```python
+from scripts.fixer import IssueFixer
+
+fixer = IssueFixer()
+fixer.load_credentials()
+
+# Fix infrastructure issues
+fixer.fix_missing_schema("catalog", "schema")
+fixer.fix_missing_secret_scope("migration_secrets")
+fixer.fix_missing_secrets("migration_secrets")
+
+# Or fix all at once
+fixer.fix_all_infrastructure("catalog", "schema", "migration_secrets")
+
+# Fix notebook content
+fixed_content = fixer.fix_notebook_format(content)      # Add header, import
+fixed_content = fixer.fix_ambiguous_columns(fixed_content)  # Prefix columns
+fixed_content = fixer.fix_serverless_flag(fixed_content)    # serverless=True
+
+# Or fix all content at once
+fixed_content = fixer.fix_notebook_content(original_content)
+
+# Fix pipeline (delete and recreate with serverless)
+action = fixer.fix_pipeline_serverless(
+    old_pipeline_id="xxx",
+    notebook_content=fixed_content,
+    pipeline_name="Migration",
+    catalog="catalog",
+    schema="schema",
+    workspace_path="/Workspace/Shared/migrations/pipeline"
+)
+
+# Get fix result
+result = fixer.get_result()
+filepath = result.save("app_fix_reports/")
+print(f"Fixed {result.total_fixed} issues")
+```

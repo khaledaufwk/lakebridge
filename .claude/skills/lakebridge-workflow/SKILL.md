@@ -250,3 +250,38 @@ User: "Use the lakebridge-workflow skill to migrate WakeCap to Databricks"
 
 Result: Migration complete after automated fixes
 ```
+
+## Scripts
+
+This skill includes Python scripts for workflow orchestration:
+
+### orchestrator.py
+
+```python
+from scripts.orchestrator import WorkflowOrchestrator, WorkflowPhase
+
+# Initialize orchestrator
+orchestrator = WorkflowOrchestrator("Add user authentication")
+
+# Track phases
+orchestrator.start_phase(WorkflowPhase.PLAN)
+orchestrator.complete_phase(
+    WorkflowPhase.PLAN,
+    session_id="abc123",
+    artifact_path="specs/add-auth.md"
+)
+
+# Check conditions
+if orchestrator.should_run_build():
+    orchestrator.start_phase(WorkflowPhase.BUILD)
+    # ...
+
+# Generate prompts for subagents
+plan_prompt = orchestrator.generate_plan_prompt()
+build_prompt = orchestrator.generate_build_prompt("specs/plan.md")
+review_prompt = orchestrator.generate_review_prompt("specs/plan.md")
+
+# Get final result
+result = orchestrator.get_result()
+print(orchestrator.format_summary())
+```

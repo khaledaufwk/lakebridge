@@ -302,6 +302,53 @@ For Migrations:
 - Pipeline URL: <link>
 ```
 
+## Scripts
+
+This skill includes Python scripts for deployment:
+
+### deployer.py
+
+```python
+from scripts.deployer import PipelineDeployer
+
+deployer = PipelineDeployer()
+deployer.load_credentials()
+
+# Validate notebook format before deploying
+issues = deployer.validate_notebook_format(notebook_content)
+if issues:
+    print("Warning:", issues)
+
+# Deploy complete pipeline
+result = deployer.deploy(
+    notebook_content=pipeline_code,
+    pipeline_name="MyMigration",
+    catalog="wakecap_prod",
+    schema="migration",
+)
+
+if result.success:
+    print(f"Pipeline URL: {result.pipeline_url}")
+    print(f"Steps: {result.steps_completed}")
+
+    # Monitor to completion
+    status = deployer.monitor(
+        result.pipeline_id,
+        result.update_id,
+        poll_interval=30
+    )
+    print(f"Final state: {status['state']}")
+else:
+    print(f"Failed: {result.error}")
+
+# Redeploy with fixed notebook
+result = deployer.redeploy(
+    pipeline_id=existing_id,
+    notebook_content=fixed_content,
+    workspace_path="/Workspace/Shared/migrations/pipeline"
+)
+```
+
 ## Examples
 
 ### Example 1: Feature Build
