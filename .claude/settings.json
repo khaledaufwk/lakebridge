@@ -4,10 +4,8 @@
     "directories": [".claude/commands"]
   },
   "skills": {
-    "enabled": false
-  },
-  "hooks": {
-    "enabled": false
+    "enabled": true,
+    "directories": [".claude/skills"]
   },
   "permissions": {
     "allow": [

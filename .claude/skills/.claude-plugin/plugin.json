@@ -1,0 +1,46 @@
+{
+  "name": "lakebridge-skills",
+  "version": "1.0.0",
+  "description": "SQL Server to Databricks migration skills with plan-build-review-fix workflow orchestration",
+  "author": "Lakebridge",
+  "repository": "https://github.com/databrickslabs/lakebridge",
+  "skills": [
+    {
+      "name": "lakebridge-workflow",
+      "path": "lakebridge-workflow",
+      "description": "Orchestrate full migration workflow using multiple subagents"
+    },
+    {
+      "name": "lakebridge-plan",
+      "path": "lakebridge-plan",
+      "description": "Create detailed engineering implementation plans"
+    },
+    {
+      "name": "lakebridge-build",
+      "path": "lakebridge-build",
+      "description": "Implement plans following step-by-step workflows"
+    },
+    {
+      "name": "lakebridge-review",
+      "path": "lakebridge-review",
+      "description": "Review completed work with risk-tiered validation"
+    },
+    {
+      "name": "lakebridge-fix",
+      "path": "lakebridge-fix",
+      "description": "Fix issues identified in code review reports"
+    },
+    {
+      "name": "lakebridge-question",
+      "path": "lakebridge-question",
+      "description": "Answer questions about project structure without coding"
+    }
+  ],
+  "keywords": [
+    "migration",
+    "databricks",
+    "sql-server",
+    "dlt",
+    "workflow"
+  ]
+}
