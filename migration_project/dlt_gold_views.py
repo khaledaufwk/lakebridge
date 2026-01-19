@@ -32,12 +32,12 @@ def gold_worker_summary():
     devices = dlt.read("silver_device")
 
     crew_assignments = (
-        dlt.read("bronze_dbo_CrewAssignments")
+        dlt.read("bronze_dbo_crewassignments")
         .filter((col("DeleteFlag").isNull()) | (col("DeleteFlag") == False))
     )
 
     device_assignments = (
-        dlt.read("bronze_dbo_DeviceAssignments")
+        dlt.read("bronze_dbo_deviceassignments")
         .filter(col("ValidTo").isNull())
         .filter((col("DeleteFlag").isNull()) | (col("DeleteFlag") == False))
     )
@@ -131,7 +131,7 @@ def gold_crew_assignments():
     workers = dlt.read("silver_worker")
     crews = dlt.read("silver_crew")
     crew_assignments = (
-        dlt.read("bronze_dbo_CrewAssignments")
+        dlt.read("bronze_dbo_crewassignments")
         .filter((col("DeleteFlag").isNull()) | (col("DeleteFlag") == False))
     )
 
@@ -164,7 +164,7 @@ def gold_device_assignments():
     workers = dlt.read("silver_worker")
     devices = dlt.read("silver_device")
     device_assignments = (
-        dlt.read("bronze_dbo_DeviceAssignments")
+        dlt.read("bronze_dbo_deviceassignments")
         .filter(col("ValidTo").isNull())
         .filter((col("DeleteFlag").isNull()) | (col("DeleteFlag") == False))
     )
@@ -198,7 +198,7 @@ def gold_workshift_assignments():
     workers = dlt.read("silver_worker")
     workshifts = dlt.read("silver_workshift")
     workshift_assignments = (
-        dlt.read("bronze_dbo_WorkshiftAssignments")
+        dlt.read("bronze_dbo_workshiftassignments")
         .filter((col("DeleteFlag").isNull()) | (col("DeleteFlag") == False))
     )
 
