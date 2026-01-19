@@ -31,7 +31,7 @@ from pyspark.sql.types import *
 def silver_worker():
     """Silver table: Cleaned worker data excluding soft-deleted records."""
     return (
-        dlt.read("bronze_dbo_Worker")
+        dlt.read("bronze_dbo_worker")
         .filter(col("DeletedAt").isNull())
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
@@ -47,7 +47,7 @@ def silver_worker():
 def silver_project():
     """Silver table: Cleaned project data excluding soft-deleted records."""
     return (
-        dlt.read("bronze_dbo_Project")
+        dlt.read("bronze_dbo_project")
         .filter(col("DeletedAt").isNull())
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
@@ -63,7 +63,7 @@ def silver_project():
 def silver_crew():
     """Silver table: Cleaned crew data excluding soft-deleted records."""
     return (
-        dlt.read("bronze_dbo_Crew")
+        dlt.read("bronze_dbo_crew")
         .filter(col("DeletedAt").isNull())
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
@@ -79,7 +79,7 @@ def silver_crew():
 def silver_device():
     """Silver table: Cleaned device data excluding soft-deleted records."""
     return (
-        dlt.read("bronze_dbo_Device")
+        dlt.read("bronze_dbo_device")
         .filter(col("DeletedAt").isNull())
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
@@ -95,7 +95,7 @@ def silver_device():
 def silver_organization():
     """Silver table: Cleaned organization data."""
     return (
-        dlt.read("bronze_dbo_Organization")
+        dlt.read("bronze_dbo_organization")
         .filter(col("DeletedAt").isNull())
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
@@ -111,7 +111,7 @@ def silver_organization():
 def silver_company():
     """Silver table: Cleaned company data."""
     return (
-        dlt.read("bronze_dbo_Company")
+        dlt.read("bronze_dbo_company")
         .filter(col("DeletedAt").isNull())
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
@@ -127,7 +127,7 @@ def silver_company():
 def silver_trade():
     """Silver table: Cleaned trade data."""
     return (
-        dlt.read("bronze_dbo_Trade")
+        dlt.read("bronze_dbo_trade")
         .filter(col("DeletedAt").isNull())
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
@@ -143,7 +143,7 @@ def silver_trade():
 def silver_floor():
     """Silver table: Cleaned floor data."""
     return (
-        dlt.read("bronze_dbo_Floor")
+        dlt.read("bronze_dbo_floor")
         .filter(col("DeletedAt").isNull())
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
@@ -159,7 +159,7 @@ def silver_floor():
 def silver_zone():
     """Silver table: Cleaned zone data."""
     return (
-        dlt.read("bronze_dbo_Zone")
+        dlt.read("bronze_dbo_zone")
         .filter(col("DeletedAt").isNull())
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
@@ -175,7 +175,7 @@ def silver_zone():
 def silver_workshift():
     """Silver table: Cleaned workshift data."""
     return (
-        dlt.read("bronze_dbo_Workshift")
+        dlt.read("bronze_dbo_workshift")
         .filter(col("DeletedAt").isNull())
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
@@ -198,7 +198,7 @@ def silver_workshift():
 def silver_workers_shifts():
     """Silver table: Cleaned workers shifts data."""
     return (
-        dlt.read("bronze_dbo_FactWorkersShifts")
+        dlt.read("bronze_dbo_factworkersshifts")
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
     )
@@ -213,7 +213,7 @@ def silver_workers_shifts():
 def silver_observations():
     """Silver table: Cleaned observations data."""
     return (
-        dlt.read("bronze_dbo_FactObservations")
+        dlt.read("bronze_dbo_factobservations")
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
     )
@@ -228,7 +228,7 @@ def silver_observations():
 def silver_reported_attendance():
     """Silver table: Cleaned reported attendance data."""
     return (
-        dlt.read("bronze_dbo_FactReportedAttendance")
+        dlt.read("bronze_dbo_factreportedattendance")
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
     )
@@ -242,7 +242,7 @@ def silver_reported_attendance():
 def silver_progress():
     """Silver table: Cleaned progress data."""
     return (
-        dlt.read("bronze_dbo_FactProgress")
+        dlt.read("bronze_dbo_factprogress")
         .withColumn("_ingested_at", current_timestamp())
         .withColumn("_source_system", lit("sqlserver"))
     )

@@ -51,101 +51,101 @@ def read_sql_server_table(table_name, schema_name="dbo"):
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_Worker",
+    name="bronze_dbo_worker",
     comment="Raw worker data from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_Worker():
+def bronze_dbo_worker():
     return read_sql_server_table("Worker", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_Project",
+    name="bronze_dbo_project",
     comment="Raw project data from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_Project():
+def bronze_dbo_project():
     return read_sql_server_table("Project", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_Crew",
+    name="bronze_dbo_crew",
     comment="Raw crew data from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_Crew():
+def bronze_dbo_crew():
     return read_sql_server_table("Crew", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_Device",
+    name="bronze_dbo_device",
     comment="Raw device data from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_Device():
+def bronze_dbo_device():
     return read_sql_server_table("Device", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_Organization",
+    name="bronze_dbo_organization",
     comment="Raw organization data from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_Organization():
+def bronze_dbo_organization():
     return read_sql_server_table("Organization", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_Company",
+    name="bronze_dbo_company",
     comment="Raw company data from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_Company():
+def bronze_dbo_company():
     return read_sql_server_table("Company", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_Trade",
+    name="bronze_dbo_trade",
     comment="Raw trade data from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_Trade():
+def bronze_dbo_trade():
     return read_sql_server_table("Trade", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_Floor",
+    name="bronze_dbo_floor",
     comment="Raw floor data from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_Floor():
+def bronze_dbo_floor():
     return read_sql_server_table("Floor", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_Zone",
+    name="bronze_dbo_zone",
     comment="Raw zone data from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_Zone():
+def bronze_dbo_zone():
     return read_sql_server_table("Zone", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_Workshift",
+    name="bronze_dbo_workshift",
     comment="Raw workshift data from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_Workshift():
+def bronze_dbo_workshift():
     return read_sql_server_table("Workshift", "dbo")
 
 # COMMAND ----------
@@ -157,46 +157,46 @@ def bronze_dbo_Workshift():
 # COMMAND ----------
 
 # DISABLED: FactWorkersHistory - takes too long to refresh
-# @dlt.table(name="bronze_dbo_FactWorkersHistory", ...)
+# @dlt.table(name="bronze_dbo_factworkershistory", ...)
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_FactWorkersShifts",
+    name="bronze_dbo_factworkersshifts",
     comment="Raw workers shifts fact from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_FactWorkersShifts():
+def bronze_dbo_factworkersshifts():
     return read_sql_server_table("FactWorkersShifts", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_FactObservations",
+    name="bronze_dbo_factobservations",
     comment="Raw observations fact from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_FactObservations():
+def bronze_dbo_factobservations():
     return read_sql_server_table("FactObservations", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_FactReportedAttendance",
+    name="bronze_dbo_factreportedattendance",
     comment="Raw reported attendance fact from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_FactReportedAttendance():
+def bronze_dbo_factreportedattendance():
     return read_sql_server_table("FactReportedAttendance", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_FactProgress",
+    name="bronze_dbo_factprogress",
     comment="Raw progress fact from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_FactProgress():
+def bronze_dbo_factprogress():
     return read_sql_server_table("FactProgress", "dbo")
 
 # COMMAND ----------
@@ -207,29 +207,29 @@ def bronze_dbo_FactProgress():
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_CrewAssignments",
+    name="bronze_dbo_crewassignments",
     comment="Raw crew assignments from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_CrewAssignments():
+def bronze_dbo_crewassignments():
     return read_sql_server_table("CrewAssignments", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_DeviceAssignments",
+    name="bronze_dbo_deviceassignments",
     comment="Raw device assignments from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_DeviceAssignments():
+def bronze_dbo_deviceassignments():
     return read_sql_server_table("DeviceAssignments", "dbo")
 
 # COMMAND ----------
 
 @dlt.table(
-    name="bronze_dbo_WorkshiftAssignments",
+    name="bronze_dbo_workshiftassignments",
     comment="Raw workshift assignments from SQL Server",
     table_properties={"quality": "bronze"}
 )
-def bronze_dbo_WorkshiftAssignments():
+def bronze_dbo_workshiftassignments():
     return read_sql_server_table("WorkshiftAssignments", "dbo")
