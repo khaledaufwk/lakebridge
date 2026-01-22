@@ -1,7 +1,7 @@
-# WakeCapDW Migration Plan - Remaining Objects
+# WakeCapDW Migration Plan
 
 **Created:** 2026-01-18
-**Last Updated:** 2026-01-20
+**Last Updated:** 2026-01-22
 
 ---
 
@@ -9,7 +9,7 @@
 
 This plan outlines the work required to complete the migration of WakeCapDW to Databricks Unity Catalog. The infrastructure and transpilation phases are complete. The remaining work focuses on:
 
-1. Loading Bronze Layer from TimescaleDB (incremental)
+1. Loading Bronze Layer from TimescaleDB (incremental) - **IMPLEMENTED**
 2. Implementing Silver Layer transformations
 3. Converting stored procedures
 4. Converting functions
@@ -18,236 +18,339 @@ This plan outlines the work required to complete the migration of WakeCapDW to D
 
 ---
 
-## Phase 1: Bronze Layer Loading from TimescaleDB (Incremental)
+## Phase 1: Bronze Layer - TimescaleDB Incremental Loading
+
+### Status: IMPLEMENTED
+
+**Job Name:** `WakeCapDW_Bronze_TimescaleDB_Raw`
+**Loader:** `TimescaleDBLoaderV2` (pipelines/timescaledb/src/timescaledb_loader_v2.py)
 
 ### Architecture Overview
 
-**Data Source:** TimescaleDB (PostgreSQL-based time-series database)
-**Loading Strategy:** Incremental loading using watermark columns (new records only)
-**Target:** Bronze Layer in Databricks Lakehouse
-
 ```
-┌─────────────────────┐      ┌───────────────────────────┐      ┌─────────────────────┐
-│    TimescaleDB      │      │   Incremental Loader      │      │   Bronze Layer      │
-│  (Source Database)  │ ───► │  (Watermark-based)        │ ───► │  (Delta Tables)     │
-│                     │      │  - Track last loaded ID   │      │  - Append-only      │
-│                     │      │  - Only fetch new records │      │  - Raw data         │
-└─────────────────────┘      └───────────────────────────┘      └─────────────────────┘
-```
-
-### 1.1 TimescaleDB Connection Configuration
-
-**Priority:** CRITICAL
-**Effort:** Low
-
-Configure TimescaleDB credentials in `migration_project/credentials_template.yml`:
-
-```yaml
-timescaledb:
-  host: YOUR_TIMESCALE_HOST_HERE
-  port: 5432
-  database: YOUR_DATABASE_NAME_HERE
-  user: YOUR_TIMESCALE_USERNAME_HERE
-  password: YOUR_TIMESCALE_PASSWORD_HERE
-  sslmode: require
-  incremental:
-    enabled: true
-    watermark_column: created_at
-    watermark_type: timestamp
-    initial_watermark: null
+┌─────────────────────┐      ┌───────────────────────────────┐      ┌─────────────────────┐
+│    TimescaleDB      │      │   TimescaleDBLoaderV2         │      │   Bronze Layer      │
+│    wakecap_app      │ ───► │   (Watermark-based)           │ ───► │   (Delta Tables)    │
+│    (PostgreSQL)     │ JDBC │   - GREATEST expressions      │      │   - 81 tables       │
+│                     │      │   - Geometry ST_AsText        │      │   - timescale_*     │
+│                     │      │   - Retry logic (3x)          │      │   - MERGE upserts   │
+└─────────────────────┘      └───────────────────────────────┘      └─────────────────────┘
+                                        │
+                                        ▼
+                              ┌───────────────────────────────┐
+                              │  Watermark Tracking           │
+                              │  _timescaledb_watermarks      │
+                              │  - Per-table state            │
+                              │  - Load status & row counts   │
+                              └───────────────────────────────┘
 ```
 
-### 1.2 Incremental Loading Strategy
+### 1.1 Technical Implementation Details
 
-**Method:** Watermark-based incremental extraction
+#### Job Configuration
 
-**How it works:**
-1. Track the last successfully loaded watermark value (timestamp or ID)
-2. Query TimescaleDB for records WHERE `watermark_column` > `last_watermark`
-3. Append new records to Raw Zone Delta tables
-4. Update watermark state after successful load
+| Parameter | Value |
+|-----------|-------|
+| Job Name | `WakeCapDW_Bronze_TimescaleDB_Raw` |
+| Schedule | Daily at 2:00 AM UTC (`0 0 2 * * ?`) |
+| Cluster | Standard_DS3_v2, 2 workers |
+| Notebook | `/Workspace/migration_project/pipelines/timescaledb/notebooks/bronze_loader_optimized` |
 
-**Watermark Storage:** Delta table `wakecap_prod.migration._watermarks`
+#### Loader Configuration
 
-```sql
-CREATE TABLE IF NOT EXISTS wakecap_prod.migration._watermarks (
-    table_name STRING,
-    watermark_column STRING,
-    last_watermark_value STRING,
-    watermark_type STRING,
-    last_load_timestamp TIMESTAMP,
-    records_loaded BIGINT
-);
-```
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `target_catalog` | `wakecap_prod` | Unity Catalog catalog |
+| `target_schema` | `raw` | Schema for bronze tables |
+| `table_prefix` | `timescale_` | Prefix for all target tables |
+| `fetch_size` | 50,000 | JDBC fetch size |
+| `batch_size` | 100,000 | Batch processing size |
+| `max_retries` | 3 | Retry attempts on failure |
+| `retry_delay` | 5 seconds | Delay between retries |
 
-### 1.3 Incremental Load Implementation
-
-**DLT Pattern for Incremental Reads:**
+#### JDBC Connection
 
 ```python
-import dlt
-from pyspark.sql.functions import col, lit, current_timestamp, max as spark_max
-import yaml
+jdbc_url = f"jdbc:postgresql://{host}:{port}/{database}?sslmode=require"
 
-def load_credentials():
-    """Load TimescaleDB credentials from YAML file."""
-    with open("/Workspace/migration_project/credentials_template.yml") as f:
-        return yaml.safe_load(f)
-
-def get_timescale_jdbc_url(config):
-    """Build JDBC URL for TimescaleDB."""
-    ts = config['timescaledb']
-    return f"jdbc:postgresql://{ts['host']}:{ts['port']}/{ts['database']}?sslmode={ts['sslmode']}"
-
-def get_last_watermark(spark, table_name):
-    """Get last loaded watermark value for a table."""
-    try:
-        result = spark.sql(f"""
-            SELECT last_watermark_value, watermark_type
-            FROM wakecap_prod.migration._watermarks
-            WHERE table_name = '{table_name}'
-        """).first()
-        return result if result else None
-    except:
-        return None
-
-def update_watermark(spark, table_name, new_watermark, watermark_column, watermark_type, records_loaded):
-    """Update watermark after successful load."""
-    spark.sql(f"""
-        MERGE INTO wakecap_prod.migration._watermarks AS target
-        USING (SELECT '{table_name}' as table_name) AS source
-        ON target.table_name = source.table_name
-        WHEN MATCHED THEN UPDATE SET
-            last_watermark_value = '{new_watermark}',
-            last_load_timestamp = current_timestamp(),
-            records_loaded = {records_loaded}
-        WHEN NOT MATCHED THEN INSERT
-            (table_name, watermark_column, last_watermark_value, watermark_type, last_load_timestamp, records_loaded)
-        VALUES ('{table_name}', '{watermark_column}', '{new_watermark}', '{watermark_type}', current_timestamp(), {records_loaded})
-    """)
-
-@dlt.table(
-    name="raw_timescale_observations",
-    comment="Raw observations loaded incrementally from TimescaleDB"
-)
-def raw_timescale_observations():
-    """Load new observations from TimescaleDB using watermark-based incremental strategy."""
-    config = load_credentials()
-    jdbc_url = get_timescale_jdbc_url(config)
-    ts = config['timescaledb']
-
-    # Get last watermark
-    last_watermark = get_last_watermark(spark, "observations")
-
-    # Build incremental query
-    if last_watermark and ts['incremental']['enabled']:
-        watermark_col = ts['incremental']['watermark_column']
-        if ts['incremental']['watermark_type'] == 'timestamp':
-            query = f"(SELECT * FROM observations WHERE {watermark_col} > '{last_watermark.last_watermark_value}'::timestamp) AS t"
-        else:
-            query = f"(SELECT * FROM observations WHERE {watermark_col} > {last_watermark.last_watermark_value}) AS t"
-    else:
-        query = "observations"
-
-    # Read from TimescaleDB
-    df = (spark.read
-        .format("jdbc")
-        .option("url", jdbc_url)
-        .option("dbtable", query)
-        .option("user", ts['user'])
-        .option("password", ts['password'])
-        .option("driver", "org.postgresql.Driver")
-        .load()
-    )
-
-    return df.withColumn("_loaded_at", current_timestamp())
+# Connection options
+.option("driver", "org.postgresql.Driver")
+.option("fetchsize", 50000)
+.option("sessionInitStatement", "SET statement_timeout = '60min'")
 ```
 
-### 1.4 Tables for Incremental Loading from TimescaleDB
+### 1.2 Secret Management
 
-| Table | Watermark Column | Type | Priority |
-|-------|------------------|------|----------|
-| observations | created_at | timestamp | HIGH |
-| worker_history | modified_at | timestamp | HIGH |
-| device_readings | reading_time | timestamp | HIGH |
-| location_events | event_time | timestamp | MEDIUM |
-| shift_records | shift_date | timestamp | MEDIUM |
+**Secret Scope:** `wakecap-timescale`
 
-### 1.5 Incremental Load Schedule
+| Secret Key | Description |
+|------------|-------------|
+| `timescaledb-host` | TimescaleDB host address |
+| `timescaledb-port` | Port (default 5432) |
+| `timescaledb-database` | Database name (wakecap_app) |
+| `timescaledb-user` | Database username |
+| `timescaledb-password` | Database password |
 
-| Load Type | Frequency | Tables |
-|-----------|-----------|--------|
-| Real-time | Every 5 min | observations, device_readings |
-| Hourly | Every hour | worker_history, location_events |
-| Daily | Once per day | shift_records, reference data |
+### 1.3 Watermark-Based Incremental Loading
 
-### 1.6 Test Single Table Ingestion
+#### Watermark Table Schema
 
-**Priority:** HIGH
-**Effort:** Low
+**Table:** `wakecap_prod.migration._timescaledb_watermarks`
 
-**Target Tables:** Start with small dimension tables
-1. `shift_types` (smallest dimension)
-2. `device_models`
-3. `observation_types`
+```sql
+CREATE TABLE _timescaledb_watermarks (
+    source_system STRING NOT NULL,           -- 'timescaledb'
+    source_schema STRING NOT NULL,           -- 'public'
+    source_table STRING NOT NULL,            -- e.g., 'Activity'
+    watermark_column STRING NOT NULL,        -- e.g., 'UpdatedAt'
+    watermark_type STRING NOT NULL,          -- 'timestamp', 'bigint', 'date'
+    watermark_expression STRING,             -- GREATEST expression if multiple columns
+    last_watermark_value STRING,             -- String representation
+    last_watermark_timestamp TIMESTAMP,      -- For timestamp types
+    last_watermark_bigint BIGINT,            -- For bigint/integer types
+    last_load_start_time TIMESTAMP,
+    last_load_end_time TIMESTAMP,
+    last_load_status STRING,                 -- 'success', 'failed', 'skipped'
+    last_load_row_count BIGINT,
+    last_error_message STRING,
+    pipeline_id STRING,
+    pipeline_run_id STRING,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    created_by STRING
+) USING DELTA
+```
 
-**Steps:**
-1. Configure TimescaleDB connection in credentials file
-2. Run DLT pipeline with single table
-3. Verify data in `wakecap_prod.migration.bronze_shift_types`
-4. Check row counts match source
+#### Incremental Query Pattern
 
-### 1.7 Dimension Tables Ingestion
+```python
+# Standard watermark query
+query = f"""
+    SELECT * FROM "{schema}"."{table}"
+    WHERE "{watermark_column}" > '{last_watermark}'
+    ORDER BY "{watermark_column}"
+"""
 
-**Priority:** HIGH
-**Effort:** Medium
+# GREATEST expression for tables with multiple timestamp columns
+query = f"""
+    SELECT * FROM "{schema}"."{table}"
+    WHERE GREATEST("CreatedAt", "UpdatedAt") > '{last_watermark}'
+    ORDER BY GREATEST("CreatedAt", "UpdatedAt")
+"""
+```
 
-**Order of ingestion (dependency-based):**
+### 1.4 Geometry Column Handling
 
-| Batch | Tables | Est. Rows |
-|-------|--------|-----------|
-| 1 | Company, Organization | Low |
-| 2 | Project, Department, Trade, WorkerRole | Low |
-| 3 | Crew, Worker, Device, DeviceModel | Medium |
-| 4 | Location, Manager, Shift, ShiftType | Low |
-| 5 | Task, Workshift, ObservationType, ReportType | Low |
+Tables with geometry columns (PostGIS) use `ST_AsText` conversion:
 
-### 1.8 Assignment Tables Ingestion
+| Table | Has Geometry | Handling |
+|-------|--------------|----------|
+| Blueprint | Yes | `ST_AsText("Geometry") AS "GeometryWKT"` |
+| DeviceLocation | Yes | `ST_AsText` conversion |
+| DeviceLocationSummary | Yes | `ST_AsText` conversion |
+| NovadeWorkPermit | Yes | `ST_AsText` conversion |
+| Space | Yes | `ST_AsText` conversion |
+| SpaceHistory | Yes | `ST_AsText` conversion |
+| Zone | Yes | `ST_AsText` conversion |
+| ZoneHistory | Yes | `ST_AsText` conversion |
+| ZoneViolationLog | Yes | `ST_AsText` conversion |
 
-**Priority:** HIGH
-**Effort:** Medium
+### 1.5 Table Registry
 
-**Tables:**
-- CrewAssignments
-- DeviceAssignments
-- LocationAssignments
-- ManagerAssignments
-- ProjectAssignments
-- TradeAssignments
-- WorkerRoleAssignments
-- WorkshiftAssignments
+**Registry File:** `pipelines/timescaledb/config/timescaledb_tables_v2.yml`
 
-### 1.9 Fact Tables Ingestion
+#### Statistics
 
-**Priority:** HIGH
-**Effort:** High (large data volumes)
+| Category | Count | Description |
+|----------|-------|-------------|
+| **Total Tables** | 81 | All tables in registry |
+| **Dimensions** | ~25 | Reference/lookup tables |
+| **Assignments** | ~15 | Association tables |
+| **Facts** | ~20 | Transactional data |
+| **History** | ~10 | Audit/history tables |
+| **With Geometry** | 9 | Tables with PostGIS columns |
 
-**Order of ingestion:**
-| Batch | Table | Expected Size |
-|-------|-------|---------------|
-| 1 | FactProgress | Medium |
-| 2 | FactReportedAttendance | High |
-| 3 | FactWorkersTasks | Medium |
-| 4 | FactWorkersContacts | High |
-| 5 | FactWorkersShifts | High |
-| 6 | FactWorkersHistory | Very High |
-| 7 | FactObservations | Very High |
-| 8 | FactWeatherObservations | Medium |
+#### Sample Table Configurations
 
-**Considerations:**
-- FactObservations and FactWorkersHistory may require incremental loading
-- Consider partitioning by date for large fact tables
-- Monitor cluster performance during ingestion
+```yaml
+# Simple dimension table
+- source_table: Company
+  primary_key_columns: [Id]
+  watermark_column: UpdatedAt
+  category: dimensions
+
+# Table with geometry
+- source_table: Zone
+  primary_key_columns: [Id]
+  watermark_column: UpdatedAt
+  has_geometry: true
+  geometry_handling: ST_AsText
+  category: dimensions
+
+# Fact table with different watermark
+- source_table: EquipmentTelemetry
+  primary_key_columns: [Id]
+  watermark_column: CreatedAt  # Uses CreatedAt instead of UpdatedAt
+  category: facts
+```
+
+### 1.6 Delta Write Strategy
+
+#### MERGE Operation for Upserts
+
+```python
+from delta.tables import DeltaTable
+
+delta_table = DeltaTable.forName(spark, target_table)
+merge_condition = " AND ".join([
+    f"target.{pk} = source.{pk}"
+    for pk in primary_key_columns
+])
+
+(
+    delta_table.alias("target")
+    .merge(df.alias("source"), merge_condition)
+    .whenMatchedUpdateAll()
+    .whenNotMatchedInsertAll()
+    .execute()
+)
+```
+
+#### Table Properties
+
+```sql
+ALTER TABLE {target_table} SET TBLPROPERTIES (
+    'delta.enableChangeDataFeed' = 'true',
+    'delta.autoOptimize.optimizeWrite' = 'true',
+    'quality' = 'bronze',
+    'source_system' = 'timescaledb',
+    'source_table' = '{source_table}'
+)
+```
+
+### 1.7 Metadata Columns
+
+Every bronze table includes:
+
+| Column | Value | Description |
+|--------|-------|-------------|
+| `_loaded_at` | `current_timestamp()` | When the row was loaded |
+| `_source_system` | `'timescaledb'` | Source system identifier |
+| `_source_schema` | `'public'` | Source schema |
+| `_source_table` | Table name | Source table name |
+| `_pipeline_id` | Notebook path | Pipeline identifier |
+| `_pipeline_run_id` | Run ID | Unique run identifier |
+
+### 1.8 Notebook Parameters
+
+The bronze loader notebook accepts these parameters:
+
+| Widget | Options | Default | Description |
+|--------|---------|---------|-------------|
+| `load_mode` | incremental, full | incremental | Load mode |
+| `category` | ALL, dimensions, assignments, facts, history | ALL | Category filter |
+| `batch_size` | numeric | 100000 | Batch processing size |
+| `fetch_size` | numeric | 50000 | JDBC fetch size |
+| `max_tables` | numeric | 0 (all) | Limit tables to load |
+
+### 1.9 Running the Bronze Job
+
+#### Via Databricks UI
+
+1. Navigate to Workflows > Jobs
+2. Find `WakeCapDW_Bronze_TimescaleDB_Raw`
+3. Click "Run Now"
+4. Set parameters:
+   - `load_mode`: "incremental" (or "full" for initial load)
+   - `category`: "ALL"
+
+#### Via CLI
+
+```bash
+# Run incremental load
+databricks jobs run-now --job-id <job-id> \
+    --notebook-params '{"load_mode": "incremental", "category": "ALL"}'
+
+# Run full load (initial or reset)
+databricks jobs run-now --job-id <job-id> \
+    --notebook-params '{"load_mode": "full", "category": "ALL"}'
+
+# Load specific category
+databricks jobs run-now --job-id <job-id> \
+    --notebook-params '{"load_mode": "incremental", "category": "dimensions"}'
+```
+
+#### Via Python Script
+
+```bash
+python run_bronze_all.py
+# or
+python monitor_pipeline.py --job-name "WakeCapDW_Bronze_TimescaleDB_Raw"
+```
+
+### 1.10 Monitoring & Verification
+
+#### Check Watermarks
+
+```sql
+SELECT
+    source_table,
+    watermark_column,
+    CASE WHEN watermark_expression IS NOT NULL THEN 'GREATEST' ELSE 'Single' END as wm_type,
+    last_load_status,
+    last_load_row_count,
+    last_watermark_timestamp,
+    last_load_end_time
+FROM wakecap_prod.migration._timescaledb_watermarks
+WHERE source_system = 'timescaledb'
+ORDER BY last_load_end_time DESC;
+```
+
+#### Verify Table Counts
+
+```sql
+-- Sample verification
+SELECT 'timescale_activity' as table_name, COUNT(*) as rows FROM wakecap_prod.raw.timescale_activity
+UNION ALL
+SELECT 'timescale_company', COUNT(*) FROM wakecap_prod.raw.timescale_company
+UNION ALL
+SELECT 'timescale_people', COUNT(*) FROM wakecap_prod.raw.timescale_people
+UNION ALL
+SELECT 'timescale_zone', COUNT(*) FROM wakecap_prod.raw.timescale_zone;
+
+-- Total table count
+SELECT COUNT(DISTINCT source_table) as loaded_tables
+FROM wakecap_prod.migration._timescaledb_watermarks
+WHERE last_load_status = 'success';
+-- Expected: 81
+```
+
+#### Check for Failures
+
+```sql
+SELECT source_table, last_error_message, last_load_end_time
+FROM wakecap_prod.migration._timescaledb_watermarks
+WHERE last_load_status = 'failed'
+ORDER BY last_load_end_time DESC;
+```
+
+### 1.11 Error Handling & Recovery
+
+#### Automatic Retry
+
+- Failed loads automatically retry up to 3 times
+- 5-second delay between retries
+- Errors logged to watermark table
+
+#### Manual Recovery
+
+```python
+# Re-run failed tables with full load
+loader.load_table(table_config, force_full_load=True)
+
+# Or via notebook parameter
+# Set load_mode = "full" and run specific category
+```
 
 ---
 
@@ -408,11 +511,6 @@ These functions implement row-level security. Conversion approach:
 | fn_ProjectPredicate | Unity Catalog Row Filter |
 | fn_UserPredicate | Unity Catalog Row Filter |
 
-**Steps:**
-1. Analyze current predicate logic
-2. Implement as Unity Catalog row-level security
-3. Apply filters to relevant tables/views
-
 ---
 
 ## Phase 4: Silver Layer Implementation
@@ -431,13 +529,13 @@ Add data quality expectations to Silver layer tables:
 
 | Table | Source | Transformations |
 |-------|--------|-----------------|
-| silver_Worker | bronze_Worker | Dedupe, clean names, validate IDs |
-| silver_Project | bronze_Project | Validate status, clean names |
-| silver_Crew | bronze_Crew | Validate references |
-| silver_Device | bronze_Device | Validate model references |
-| silver_Organization | bronze_Organization | Hierarchy validation |
-| silver_FactObservations | bronze_FactObservations | Date validation, deduplication |
-| silver_FactWorkersShifts | bronze_FactWorkersShifts | Time calculations, validation |
+| silver_Worker | timescale_people | Dedupe, clean names, validate IDs |
+| silver_Project | timescale_* | Validate status, clean names |
+| silver_Crew | timescale_crew | Validate references |
+| silver_Device | timescale_* | Validate model references |
+| silver_Organization | timescale_company | Hierarchy validation |
+| silver_FactObservations | timescale_* | Date validation, deduplication |
+| silver_FactWorkersShifts | timescale_workshift* | Time calculations, validation |
 
 ---
 
@@ -445,7 +543,7 @@ Add data quality expectations to Silver layer tables:
 
 ### 5.1 Business Views
 
-Implement remaining 24 views not yet configured:
+Implement remaining views:
 
 | View | Priority | Dependencies |
 |------|----------|--------------|
@@ -454,25 +552,8 @@ Implement remaining 24 views not yet configured:
 | gold_vwFactWorkersTasks | MEDIUM | silver_FactWorkersTasks |
 | gold_vwFactObservations | HIGH | silver_FactObservations |
 | gold_vwFactProgress | MEDIUM | silver_FactProgress |
-| gold_vwFactWeatherObservations | LOW | silver_FactWeatherObservations |
 | gold_vwLocation | MEDIUM | silver_Location |
-| gold_vwLocationAssignment | MEDIUM | silver_LocationAssignment |
 | gold_vwManager | MEDIUM | silver_Manager |
-| gold_vwManagerAssignment | MEDIUM | silver_ManagerAssignment |
-| gold_vwDepartment | LOW | silver_Department |
-| gold_vwTrade | LOW | silver_Trade |
-| gold_vwTradeAssignment | LOW | silver_TradeAssignment |
-| gold_vwWorkerRole | LOW | silver_WorkerRole |
-| gold_vwWorkerRoleAssignment | LOW | silver_WorkerRoleAssignment |
-| gold_vwTask | MEDIUM | silver_Task |
-| gold_vwCompany | LOW | silver_Company |
-| gold_vwDeviceModel | LOW | silver_DeviceModel |
-| gold_vwObservationType | LOW | silver_ObservationType |
-| gold_vwReportType | LOW | silver_ReportType |
-| gold_vwDeviceAssignment | MEDIUM | silver_DeviceAssignment |
-| gold_vwDeviceAssignment_Continuous | MEDIUM | silver_DeviceAssignment |
-| gold_vwProjectAssignment | MEDIUM | silver_ProjectAssignment |
-| gold_vwWorkshiftAssignments | MEDIUM | silver_WorkshiftAssignments |
 
 ---
 
@@ -481,9 +562,9 @@ Implement remaining 24 views not yet configured:
 ### 6.1 Row Count Validation
 
 ```python
-# For each table - compare TimescaleDB source to Databricks target
+# Compare TimescaleDB source to Databricks target
 source_count = spark.read.jdbc(timescale_jdbc_url, table).count()
-target_count = spark.table(f"wakecap_prod.migration.{table}").count()
+target_count = spark.table(f"wakecap_prod.raw.timescale_{table.lower()}").count()
 assert source_count == target_count, f"Row count mismatch: {table}"
 ```
 
@@ -497,7 +578,7 @@ Verify data type mappings (PostgreSQL/TimescaleDB → Databricks):
 - `numeric(p,s)` → `DECIMAL(p,s)`
 - `boolean` → `BOOLEAN`
 - `jsonb` → `STRING` (JSON stored as string)
-- `geometry` / `geography` → Custom handling (H3 or GeoJSON STRING)
+- `geometry` / `geography` → `STRING` (WKT via ST_AsText)
 
 ### 6.3 Business Logic Validation
 
@@ -507,19 +588,15 @@ Compare key aggregations:
 - Total shifts by project
 - Sum of hours worked
 
-### 6.4 Performance Testing
-
-- Query performance comparison
-- Dashboard load times
-- Concurrent user testing
-
 ---
 
 ## Phase 7: Production Deployment
 
 ### 7.1 Pre-Production Checklist
 
-- [ ] All bronze tables populated
+- [x] Bronze layer tables populated (81 tables)
+- [x] Incremental loading working
+- [x] Watermark tracking operational
 - [ ] Silver layer transformations complete
 - [ ] Gold layer views working
 - [ ] Critical stored procedures converted
@@ -528,60 +605,37 @@ Compare key aggregations:
 - [ ] Performance acceptable
 - [ ] Security (RLS) implemented
 
-### 7.2 Cutover Steps
+### 7.2 Production Schedule
 
-1. Disable development mode in pipeline
-2. Set up production scheduling
-3. Configure alerting and monitoring
-4. Update downstream applications to use Databricks as data source
-5. Run parallel validation for 1-2 weeks
-6. Transition to production incremental loading from TimescaleDB
+| Job | Schedule | Description |
+|-----|----------|-------------|
+| WakeCapDW_Bronze_TimescaleDB_Raw | Daily 2:00 AM UTC | Incremental bronze load |
+| DLT Pipeline | Every 4 hours | Silver/Gold transformations |
+| Validation Job | Weekly | Data reconciliation |
 
 ---
 
-## Appendix A: Object Inventory
+## Appendix A: File Inventory
 
-### Tables Not Yet in Pipeline (112 remaining)
+### Bronze Layer Files
 
-The following tables need to be added to the DLT pipeline configuration:
+| File | Purpose |
+|------|---------|
+| `pipelines/timescaledb/notebooks/bronze_loader_optimized.py` | Main loader notebook |
+| `pipelines/timescaledb/notebooks/bronze_loader_dimensions.py` | Dimension-only loader |
+| `pipelines/timescaledb/notebooks/bronze_loader_facts.py` | Fact-only loader |
+| `pipelines/timescaledb/notebooks/bronze_loader_assignments.py` | Assignment-only loader |
+| `pipelines/timescaledb/src/timescaledb_loader_v2.py` | Loader module |
+| `pipelines/timescaledb/config/timescaledb_tables_v2.yml` | Table registry (81 tables) |
 
-```
-AlertConfig, AlertHistory, AuditLog,
-BatchJob, BatchJobHistory,
-Calendar, CalendarException,
-Configuration, ConfigurationHistory,
-Currency, CurrencyRate,
-DataQualityRule, DataQualityResult,
-EmailTemplate, EmailLog,
-FeatureFlag, FeatureFlagHistory,
-Gateway, GatewayConfig, GatewayLog,
-Holiday, HolidayCalendar,
-Integration, IntegrationConfig, IntegrationLog,
-JobSchedule, JobScheduleHistory,
-KeyValue, KeyValueHistory,
-Language, LanguageTranslation,
-Metric, MetricHistory,
-Notification, NotificationConfig, NotificationLog,
-Permission, PermissionGroup, PermissionRole,
-QueueItem, QueueItemHistory,
-Report, ReportConfig, ReportSchedule,
-Setting, SettingHistory,
-SystemLog, SystemMetric,
-Tenant, TenantConfig,
-User, UserPreference, UserSession,
-Version, VersionHistory,
-Webhook, WebhookConfig, WebhookLog,
-Zone, ZoneConfig, ZoneAssignment
-... and more
-```
+### Production Scripts
 
-### Stored Procedures Full List (70)
-
-See `migration_project/source_sql/stored_procedures/` for complete list.
-
-### Functions Full List (23)
-
-See `migration_project/source_sql/functions/` for complete list.
+| Script | Purpose |
+|--------|---------|
+| `run_bronze_all.py` | Run all bronze tables |
+| `run_bronze_raw.py` | Run raw bronze |
+| `monitor_pipeline.py` | Monitor pipeline execution |
+| `check_watermarks.py` | Verify watermarks |
 
 ---
 
@@ -589,27 +643,11 @@ See `migration_project/source_sql/functions/` for complete list.
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|------------|--------|------------|
-| Large table ingestion timeout | Medium | High | Implement incremental loading |
-| Spatial function accuracy | Medium | Medium | Validate against source |
+| Large table timeout | Medium | High | 60-min statement timeout, incremental loading |
+| Geometry conversion errors | Low | Medium | ST_AsText fallback, validation |
+| Network interruption | Medium | Medium | Automatic retry (3x with 5s delay) |
+| Data loss during migration | Low | Critical | Full backup, watermark tracking |
 | Performance degradation | Low | High | Performance testing before cutover |
-| Data loss during migration | Low | Critical | Full backup, reconciliation |
-| Security gap (RLS) | Medium | High | Implement UC row filters |
-
----
-
-## Appendix C: Resource Requirements
-
-### Databricks Cluster Sizing
-
-- **Development:** Standard_DS3_v2 (4 cores, 14GB RAM)
-- **Production:** Standard_DS4_v2 or larger for fact table processing
-- **Autoscaling:** 2-8 workers for variable workloads
-
-### Estimated Costs
-
-- Development cluster: ~$X/hour
-- Production cluster: ~$X/hour
-- Storage: ~$X/month for Delta tables
 
 ---
 
