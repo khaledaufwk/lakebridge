@@ -5,13 +5,13 @@ This guide provides step-by-step instructions for deploying the WakeCapDW migrat
 ## Prerequisites
 
 ### Azure Resources
-- Azure SQL Server with WakeCapDW_20251215 database
+- TimescaleDB instance with wakecap_app database
 - Databricks workspace with Unity Catalog enabled
 - Azure Key Vault for secrets management
 
 ### Access Requirements
 - Databricks workspace admin access
-- SQL Server read access
+- TimescaleDB read access (PostgreSQL)
 - Azure Key Vault access
 
 ### Tools
@@ -20,90 +20,188 @@ This guide provides step-by-step instructions for deploying the WakeCapDW migrat
 
 ---
 
-## Phase 1: Databricks Direct Ingestion (Replaces ADF)
+## Phase 1: Bronze Layer - TimescaleDB Ingestion
 
-The migration uses **Databricks notebooks with JDBC** to read directly from SQL Server, eliminating the need for Azure Data Factory.
+The migration uses **Databricks notebooks with JDBC** to read directly from TimescaleDB, using watermark-based incremental extraction.
 
 ### Architecture
 
 ```
 ┌─────────────────┐     JDBC      ┌─────────────────┐
-│  SQL Server     │ ────────────> │   Databricks    │
-│  WakeCapDW      │               │   Delta Lake    │
+│   TimescaleDB   │ ────────────> │   Databricks    │
+│   wakecap_app   │  (PostgreSQL) │   Delta Lake    │
 └─────────────────┘               └─────────────────┘
                                         │
                                         ▼
                               ┌─────────────────────┐
                               │  wakecap_prod.raw   │
-                              │  (Delta Tables)     │
+                              │  (81 Delta Tables)  │
+                              │  timescale_*        │
                               └─────────────────────┘
 ```
 
-### 1.1 Configure Azure Key Vault Secrets
+### 1.1 Configure TimescaleDB Secrets
 
-Create the following secrets in your Key Vault scope (`akv-wakecap24`):
+Create the secret scope and store TimescaleDB credentials:
 
 ```bash
-# Using Databricks CLI
-databricks secrets create-scope akv-wakecap24 --scope-backend-type AZURE_KEYVAULT \
-    --resource-id /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.KeyVault/vaults/{vault}
+# Create secret scope (if not exists)
+databricks secrets create-scope wakecap-timescale
 
-# Or using Azure CLI to add secrets to Key Vault
-az keyvault secret set --vault-name wakecap24 \
-    --name sqlserver-wakecap-password \
-    --value "your-sql-server-password"
+# Store TimescaleDB credentials
+databricks secrets put-secret wakecap-timescale host --string-value "your-timescale-host.timescaledb.io"
+databricks secrets put-secret wakecap-timescale port --string-value "5432"
+databricks secrets put-secret wakecap-timescale database --string-value "wakecap_app"
+databricks secrets put-secret wakecap-timescale username --string-value "your-username"
+databricks secrets put-secret wakecap-timescale password --string-value "your-password"
 ```
 
-### 1.2 Deploy Ingestion Notebooks
+Or via Azure Key Vault:
+
+```bash
+# Link to Azure Key Vault
+databricks secrets create-scope wakecap-timescale --scope-backend-type AZURE_KEYVAULT \
+    --resource-id /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.KeyVault/vaults/{vault}
+
+# Add secrets to Key Vault
+az keyvault secret set --vault-name wakecap24 --name timescale-host --value "your-host"
+az keyvault secret set --vault-name wakecap24 --name timescale-password --value "your-password"
+```
+
+### 1.2 Deploy Bronze Loader Notebooks
 
 **Option A: Python Script**
 ```bash
-cd migration_project/databricks
-
-pip install databricks-sdk
-
-python deploy_ingestion_pipeline.py \
-    --host https://adb-3022397433351638.18.azuredatabricks.net \
-    --token <your-pat-token> \
-    --job-type orchestrator
+cd migration_project
+python deploy_timescaledb_bronze.py
 ```
 
 **Option B: Databricks CLI**
 ```bash
 # Create workspace folders
-databricks workspace mkdirs /Workspace/WakeCapDW/notebooks
+databricks workspace mkdirs /Workspace/migration_project/pipelines/timescaledb/notebooks
+databricks workspace mkdirs /Workspace/migration_project/pipelines/timescaledb/src
+databricks workspace mkdirs /Workspace/migration_project/pipelines/timescaledb/config
 
 # Upload notebooks
-databricks workspace import notebooks/sqlserver_incremental_load.py \
-    /Workspace/WakeCapDW/notebooks/sqlserver_incremental_load \
+databricks workspace import pipelines/timescaledb/notebooks/bronze_loader_optimized.py \
+    /Workspace/migration_project/pipelines/timescaledb/notebooks/bronze_loader_optimized \
     --format SOURCE --language PYTHON --overwrite
 
-databricks workspace import notebooks/wakecapdw_orchestrator.py \
-    /Workspace/WakeCapDW/notebooks/wakecapdw_orchestrator \
+databricks workspace import pipelines/timescaledb/notebooks/bronze_loader_dimensions.py \
+    /Workspace/migration_project/pipelines/timescaledb/notebooks/bronze_loader_dimensions \
     --format SOURCE --language PYTHON --overwrite
 
-# Create job
-databricks jobs create --json @jobs/wakecapdw_migration_job.json
+databricks workspace import pipelines/timescaledb/notebooks/bronze_loader_facts.py \
+    /Workspace/migration_project/pipelines/timescaledb/notebooks/bronze_loader_facts \
+    --format SOURCE --language PYTHON --overwrite
+
+databricks workspace import pipelines/timescaledb/notebooks/bronze_loader_assignments.py \
+    /Workspace/migration_project/pipelines/timescaledb/notebooks/bronze_loader_assignments \
+    --format SOURCE --language PYTHON --overwrite
+
+# Upload source modules
+databricks workspace import pipelines/timescaledb/src/timescaledb_loader_v2.py \
+    /Workspace/migration_project/pipelines/timescaledb/src/timescaledb_loader_v2 \
+    --format SOURCE --language PYTHON --overwrite
+
+# Upload config
+databricks workspace import pipelines/timescaledb/config/timescaledb_tables_v2.yml \
+    /Workspace/migration_project/pipelines/timescaledb/config/timescaledb_tables_v2.yml \
+    --format AUTO --overwrite
 ```
 
-### 1.3 Run Initial Full Load
+### 1.3 Create Bronze Job
+
+Create the Databricks job for bronze layer loading:
+
+```bash
+databricks jobs create --json '{
+  "name": "WakeCapDW_Bronze_TimescaleDB_Raw",
+  "tasks": [
+    {
+      "task_key": "bronze_load_all",
+      "notebook_task": {
+        "notebook_path": "/Workspace/migration_project/pipelines/timescaledb/notebooks/bronze_loader_optimized",
+        "base_parameters": {
+          "load_mode": "incremental",
+          "category": "ALL"
+        }
+      },
+      "job_cluster_key": "bronze_cluster"
+    }
+  ],
+  "job_clusters": [
+    {
+      "job_cluster_key": "bronze_cluster",
+      "new_cluster": {
+        "spark_version": "14.3.x-scala2.12",
+        "node_type_id": "Standard_DS3_v2",
+        "num_workers": 2,
+        "spark_conf": {
+          "spark.databricks.delta.preview.enabled": "true"
+        }
+      }
+    }
+  ],
+  "schedule": {
+    "quartz_cron_expression": "0 0 2 * * ?",
+    "timezone_id": "UTC"
+  }
+}'
+```
+
+### 1.4 Run Initial Full Load
 
 1. Open Databricks > Workflows > Jobs
-2. Find "WakeCapDW_Migration_Incremental"
+2. Find "WakeCapDW_Bronze_TimescaleDB_Raw"
 3. Click "Run Now" with parameters:
-   - For first run, tables will auto-detect as initial load
+   - `load_mode`: "full" (for initial load)
+   - `category`: "ALL"
 4. Monitor job execution in the Runs tab
 
-### 1.4 Verify Data in Delta Tables
+Or via CLI:
+```bash
+databricks jobs run-now --job-id <job-id> --notebook-params '{"load_mode": "full", "category": "ALL"}'
+```
+
+### 1.5 Verify Data in Delta Tables
 
 ```sql
 -- In Databricks SQL
-SELECT COUNT(*) FROM wakecap_prod.raw.wakecapdw_dbo_worker;
-SELECT COUNT(*) FROM wakecap_prod.raw.wakecapdw_dbo_project;
-SELECT COUNT(*) FROM wakecap_prod.raw.wakecapdw_dbo_factworkershistory;
+-- Check sample bronze tables
+SELECT COUNT(*) FROM wakecap_prod.raw.timescale_activity;
+SELECT COUNT(*) FROM wakecap_prod.raw.timescale_company;
+SELECT COUNT(*) FROM wakecap_prod.raw.timescale_people;
+SELECT COUNT(*) FROM wakecap_prod.raw.timescale_zone;
 
 -- Check watermarks
-SHOW TBLPROPERTIES wakecap_prod.raw.wakecapdw_dbo_worker;
+SELECT
+    source_table,
+    last_load_status,
+    last_load_row_count,
+    last_watermark_timestamp,
+    last_load_end_time
+FROM wakecap_prod.migration._timescaledb_watermarks
+ORDER BY last_load_end_time DESC
+LIMIT 20;
+
+-- Verify table count
+SELECT COUNT(DISTINCT source_table) as table_count
+FROM wakecap_prod.migration._timescaledb_watermarks;
+-- Expected: 81 tables
+```
+
+### 1.6 Monitor Incremental Loads
+
+Use the monitoring script:
+```bash
+python monitor_pipeline.py --job-name "WakeCapDW_Bronze_TimescaleDB_Raw"
+```
+
+Or check watermarks:
+```bash
+python check_watermarks.py
 ```
 
 ---
@@ -242,8 +340,8 @@ Or via UI:
 
 **Issue: Row count mismatch**
 - Check if incremental extraction is missing data
-- Verify watermark values in SyncState table
-- Re-run full extract if needed
+- Verify watermark values in `_timescaledb_watermarks` table
+- Re-run full extract if needed: `load_mode=full`
 
 **Issue: NULL primary keys**
 - Review source data quality
@@ -254,6 +352,11 @@ Or via UI:
 - Check for data type precision differences
 - Review NULL handling in calculations
 - Compare specific records
+
+**Issue: Geometry column errors**
+- Tables with geometry use `ST_AsText` conversion
+- Check `has_geometry: true` in table registry
+- Verify PostGIS extension is available in TimescaleDB
 
 ---
 
@@ -267,10 +370,10 @@ Or via UI:
 
 ### 5.2 Schedule Incremental Updates
 
-**ADF Incremental Pipeline:**
-1. Create trigger for WakeCapDW_IncrementalExtract
-2. Schedule: Daily at 2:00 AM UTC
-3. Parameters: Each fact table with incrementalColumn
+**Bronze Layer (TimescaleDB):**
+1. Job "WakeCapDW_Bronze_TimescaleDB_Raw" is scheduled daily at 2:00 AM UTC
+2. Uses watermark-based incremental extraction
+3. Parameters: `load_mode=incremental`, `category=ALL`
 
 **DLT Pipeline:**
 - Set to "Continuous" mode for streaming, OR
@@ -290,8 +393,11 @@ SET ROW FILTER security.organization_filter ON (OrganizationID);
 ### 5.4 Enable Monitoring
 
 1. Configure DLT pipeline alerts (email/Slack)
-2. Set up Azure Monitor for ADF pipelines
-3. Create dashboard for data freshness metrics
+2. Set up monitoring dashboard for:
+   - Bronze job status and row counts
+   - Watermark progression
+   - Data freshness metrics
+3. Use `monitor_pipeline.py` for CLI monitoring
 
 ---
 
@@ -320,7 +426,7 @@ SET ROW FILTER security.organization_filter ON (OrganizationID);
 
 | Category | Path | Purpose |
 |----------|------|---------|
-| DLT | `pipelines/dlt/bronze_all_tables.py` | 142 Bronze tables |
+| DLT | `pipelines/dlt/bronze_all_tables.py` | Bronze tables from Delta |
 | DLT | `pipelines/dlt/streaming_*.py` | CDC streaming tables |
 | DLT | `pipelines/dlt/silver_*.py` | Silver layer with DQ |
 | DLT | `pipelines/dlt/gold_views.py` | Business views |
@@ -330,7 +436,7 @@ SET ROW FILTER security.organization_filter ON (OrganizationID);
 | TimescaleDB | `pipelines/timescaledb/dlt_timescaledb_bronze.py` | Bronze DLT definitions |
 | TimescaleDB | `pipelines/timescaledb/notebooks/*.py` | Modular loaders |
 | TimescaleDB | `pipelines/timescaledb/src/*.py` | Loader modules |
-| TimescaleDB | `pipelines/timescaledb/config/*.yml` | Table registries |
+| TimescaleDB | `pipelines/timescaledb/config/*.yml` | Table registries (81 tables) |
 | Main | `pipelines/wakecap_migration_pipeline.py` | Main migration pipeline |
 
 ### Databricks Config
@@ -343,13 +449,47 @@ SET ROW FILTER security.organization_filter ON (OrganizationID);
 | Scripts | `databricks/scripts/*.py` | Deployment scripts |
 | Pipeline | `databricks/dlt_pipeline_config.json` | DLT pipeline config |
 
-### ADF (Legacy)
+---
 
-| Category | File | Purpose |
-|----------|------|---------|
-| ADF | `adf/arm_template.json` | ARM deployment template |
-| ADF | `adf/deploy_adf.ps1` | PowerShell deployment script |
-| ADF | `adf/pipeline_config.json` | Table configuration |
+## Data Flow Summary
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        DATA FLOW                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  TimescaleDB (wakecap_app)                                          │
+│       │                                                              │
+│       │ JDBC (PostgreSQL driver)                                    │
+│       │ Watermark-based incremental                                 │
+│       ▼                                                              │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  BRONZE LAYER (wakecap_prod.raw)                            │   │
+│  │  - 81 tables: timescale_*                                   │   │
+│  │  - Job: WakeCapDW_Bronze_TimescaleDB_Raw                    │   │
+│  │  - Watermarks: _timescaledb_watermarks                      │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│       │                                                              │
+│       │ DLT Pipeline (streaming/batch)                              │
+│       ▼                                                              │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  SILVER LAYER (wakecap_prod.silver)                         │   │
+│  │  - Data quality expectations                                │   │
+│  │  - Deduplication                                            │   │
+│  │  - Type standardization                                     │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│       │                                                              │
+│       │ DLT transformations                                         │
+│       ▼                                                              │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  GOLD LAYER (wakecap_prod.gold)                             │   │
+│  │  - Business views                                           │   │
+│  │  - Aggregations                                             │   │
+│  │  - Row-level security                                       │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -357,8 +497,9 @@ SET ROW FILTER security.organization_filter ON (OrganizationID);
 
 For issues with this migration:
 1. Check DLT pipeline event logs
-2. Review MIGRATION_STATUS.md for conversion details
-3. Compare source SQL with converted Python/DLT code
+2. Check bronze job logs and watermark table
+3. Review MIGRATION_STATUS.md for conversion details
+4. Compare source data with converted Delta tables
 
 ---
 
