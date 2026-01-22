@@ -1,0 +1,350 @@
+{
+  "name": "WakeCapDW_Migration_PerTable",
+  "description": "Per-table incremental load from WakeCapDW SQL Server - individual tasks for each table",
+  "email_notifications": {
+    "on_failure": ["data-team@wakecap.com"],
+    "no_alert_for_skipped_runs": true
+  },
+  "timeout_seconds": 21600,
+  "max_concurrent_runs": 1,
+  "tasks": [
+    {
+      "task_key": "raw_organization",
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load",
+        "base_parameters": {
+          "secret_scope": "akv-wakecap24",
+          "source_driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+          "source_user": "wakecap_reader",
+          "source_pwd_secret_name": "sqlserver-wakecap-password",
+          "source_url": "jdbc:sqlserver://wakecap24.database.windows.net:1433",
+          "source_database": "WakeCapDW_20251215",
+          "source_system_ref": "wakecapdw",
+          "source_schema": "dbo",
+          "source_dataset_ref": "Organization",
+          "target_catalog": "wakecap_prod",
+          "target_schema": "raw",
+          "primary_key_columns": "OrganizationID",
+          "is_full_load": "1"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_cluster",
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "raw_project",
+      "depends_on": [{"task_key": "raw_organization"}],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load",
+        "base_parameters": {
+          "secret_scope": "akv-wakecap24",
+          "source_driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+          "source_user": "wakecap_reader",
+          "source_pwd_secret_name": "sqlserver-wakecap-password",
+          "source_url": "jdbc:sqlserver://wakecap24.database.windows.net:1433",
+          "source_database": "WakeCapDW_20251215",
+          "source_system_ref": "wakecapdw",
+          "source_schema": "dbo",
+          "source_dataset_ref": "Project",
+          "target_catalog": "wakecap_prod",
+          "target_schema": "raw",
+          "primary_key_columns": "ProjectID",
+          "is_full_load": "1"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_cluster",
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "raw_worker",
+      "depends_on": [{"task_key": "raw_organization"}],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load",
+        "base_parameters": {
+          "secret_scope": "akv-wakecap24",
+          "source_driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+          "source_user": "wakecap_reader",
+          "source_pwd_secret_name": "sqlserver-wakecap-password",
+          "source_url": "jdbc:sqlserver://wakecap24.database.windows.net:1433",
+          "source_database": "WakeCapDW_20251215",
+          "source_system_ref": "wakecapdw",
+          "source_schema": "dbo",
+          "source_dataset_ref": "Worker",
+          "target_catalog": "wakecap_prod",
+          "target_schema": "raw",
+          "primary_key_columns": "WorkerID",
+          "source_watermark_column": "WatermarkUTC",
+          "is_full_load": "0"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_cluster",
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "raw_crew",
+      "depends_on": [{"task_key": "raw_project"}],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load",
+        "base_parameters": {
+          "secret_scope": "akv-wakecap24",
+          "source_driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+          "source_user": "wakecap_reader",
+          "source_pwd_secret_name": "sqlserver-wakecap-password",
+          "source_url": "jdbc:sqlserver://wakecap24.database.windows.net:1433",
+          "source_database": "WakeCapDW_20251215",
+          "source_system_ref": "wakecapdw",
+          "source_schema": "dbo",
+          "source_dataset_ref": "Crew",
+          "target_catalog": "wakecap_prod",
+          "target_schema": "raw",
+          "primary_key_columns": "CrewID",
+          "source_watermark_column": "WatermarkUTC",
+          "is_full_load": "0"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_cluster",
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "raw_floor",
+      "depends_on": [{"task_key": "raw_project"}],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load",
+        "base_parameters": {
+          "secret_scope": "akv-wakecap24",
+          "source_driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+          "source_user": "wakecap_reader",
+          "source_pwd_secret_name": "sqlserver-wakecap-password",
+          "source_url": "jdbc:sqlserver://wakecap24.database.windows.net:1433",
+          "source_database": "WakeCapDW_20251215",
+          "source_system_ref": "wakecapdw",
+          "source_schema": "dbo",
+          "source_dataset_ref": "Floor",
+          "target_catalog": "wakecap_prod",
+          "target_schema": "raw",
+          "primary_key_columns": "FloorID",
+          "source_watermark_column": "WatermarkUTC",
+          "custom_column_mapping": "{\"Geometry\": \"Geometry.STAsText()\"}",
+          "is_full_load": "0"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_cluster",
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "raw_zone",
+      "depends_on": [{"task_key": "raw_floor"}],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load",
+        "base_parameters": {
+          "secret_scope": "akv-wakecap24",
+          "source_driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+          "source_user": "wakecap_reader",
+          "source_pwd_secret_name": "sqlserver-wakecap-password",
+          "source_url": "jdbc:sqlserver://wakecap24.database.windows.net:1433",
+          "source_database": "WakeCapDW_20251215",
+          "source_system_ref": "wakecapdw",
+          "source_schema": "dbo",
+          "source_dataset_ref": "Zone",
+          "target_catalog": "wakecap_prod",
+          "target_schema": "raw",
+          "primary_key_columns": "ZoneID",
+          "source_watermark_column": "WatermarkUTC",
+          "custom_column_mapping": "{\"Geometry\": \"Geometry.STAsText()\"}",
+          "is_full_load": "0"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_cluster",
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "raw_device",
+      "depends_on": [{"task_key": "raw_organization"}],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load",
+        "base_parameters": {
+          "secret_scope": "akv-wakecap24",
+          "source_driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+          "source_user": "wakecap_reader",
+          "source_pwd_secret_name": "sqlserver-wakecap-password",
+          "source_url": "jdbc:sqlserver://wakecap24.database.windows.net:1433",
+          "source_database": "WakeCapDW_20251215",
+          "source_system_ref": "wakecapdw",
+          "source_schema": "dbo",
+          "source_dataset_ref": "Device",
+          "target_catalog": "wakecap_prod",
+          "target_schema": "raw",
+          "primary_key_columns": "DeviceID",
+          "source_watermark_column": "WatermarkUTC",
+          "is_full_load": "0"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_cluster",
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "raw_crew_assignments",
+      "depends_on": [{"task_key": "raw_crew"}, {"task_key": "raw_worker"}],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load",
+        "base_parameters": {
+          "secret_scope": "akv-wakecap24",
+          "source_driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+          "source_user": "wakecap_reader",
+          "source_pwd_secret_name": "sqlserver-wakecap-password",
+          "source_url": "jdbc:sqlserver://wakecap24.database.windows.net:1433",
+          "source_database": "WakeCapDW_20251215",
+          "source_system_ref": "wakecapdw",
+          "source_schema": "dbo",
+          "source_dataset_ref": "CrewAssignments",
+          "target_catalog": "wakecap_prod",
+          "target_schema": "raw",
+          "primary_key_columns": "CrewAssignmentID",
+          "source_watermark_column": "WatermarkUTC",
+          "is_full_load": "0"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_cluster",
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "raw_device_assignments",
+      "depends_on": [{"task_key": "raw_device"}, {"task_key": "raw_worker"}],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load",
+        "base_parameters": {
+          "secret_scope": "akv-wakecap24",
+          "source_driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+          "source_user": "wakecap_reader",
+          "source_pwd_secret_name": "sqlserver-wakecap-password",
+          "source_url": "jdbc:sqlserver://wakecap24.database.windows.net:1433",
+          "source_database": "WakeCapDW_20251215",
+          "source_system_ref": "wakecapdw",
+          "source_schema": "dbo",
+          "source_dataset_ref": "DeviceAssignments",
+          "target_catalog": "wakecap_prod",
+          "target_schema": "raw",
+          "primary_key_columns": "DeviceAssignmentID",
+          "source_watermark_column": "WatermarkUTC",
+          "is_full_load": "0"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_cluster",
+      "timeout_seconds": 1800
+    },
+    {
+      "task_key": "raw_fact_workers_history",
+      "depends_on": [{"task_key": "raw_worker"}, {"task_key": "raw_zone"}],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load",
+        "base_parameters": {
+          "secret_scope": "akv-wakecap24",
+          "source_driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+          "source_user": "wakecap_reader",
+          "source_pwd_secret_name": "sqlserver-wakecap-password",
+          "source_url": "jdbc:sqlserver://wakecap24.database.windows.net:1433",
+          "source_database": "WakeCapDW_20251215",
+          "source_system_ref": "wakecapdw",
+          "source_schema": "dbo",
+          "source_dataset_ref": "FactWorkersHistory",
+          "target_catalog": "wakecap_prod",
+          "target_schema": "raw",
+          "primary_key_columns": "WorkerHistoryID",
+          "source_watermark_column": "WatermarkUTC",
+          "is_full_load": "0"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_cluster",
+      "timeout_seconds": 3600
+    },
+    {
+      "task_key": "raw_fact_workers_shifts",
+      "depends_on": [{"task_key": "raw_worker"}, {"task_key": "raw_project"}],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load",
+        "base_parameters": {
+          "secret_scope": "akv-wakecap24",
+          "source_driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+          "source_user": "wakecap_reader",
+          "source_pwd_secret_name": "sqlserver-wakecap-password",
+          "source_url": "jdbc:sqlserver://wakecap24.database.windows.net:1433",
+          "source_database": "WakeCapDW_20251215",
+          "source_system_ref": "wakecapdw",
+          "source_schema": "dbo",
+          "source_dataset_ref": "FactWorkersShifts",
+          "target_catalog": "wakecap_prod",
+          "target_schema": "raw",
+          "primary_key_columns": "WorkerShiftID",
+          "source_watermark_column": "WatermarkUTC",
+          "is_full_load": "0"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_cluster",
+      "timeout_seconds": 3600
+    },
+    {
+      "task_key": "raw_fact_observations",
+      "depends_on": [{"task_key": "raw_worker"}, {"task_key": "raw_device"}],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load",
+        "base_parameters": {
+          "secret_scope": "akv-wakecap24",
+          "source_driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+          "source_user": "wakecap_reader",
+          "source_pwd_secret_name": "sqlserver-wakecap-password",
+          "source_url": "jdbc:sqlserver://wakecap24.database.windows.net:1433",
+          "source_database": "WakeCapDW_20251215",
+          "source_system_ref": "wakecapdw",
+          "source_schema": "dbo",
+          "source_dataset_ref": "FactObservations",
+          "target_catalog": "wakecap_prod",
+          "target_schema": "raw",
+          "primary_key_columns": "ObservationID",
+          "source_watermark_column": "WatermarkUTC",
+          "is_full_load": "0"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_cluster",
+      "timeout_seconds": 7200
+    }
+  ],
+  "job_clusters": [
+    {
+      "job_cluster_key": "wakecap_cluster",
+      "new_cluster": {
+        "spark_version": "14.3.x-scala2.12",
+        "azure_attributes": {
+          "first_on_demand": 1,
+          "availability": "ON_DEMAND_AZURE",
+          "spot_bid_max_price": -1
+        },
+        "node_type_id": "Standard_DS3_v2",
+        "enable_elastic_disk": true,
+        "data_security_mode": "SINGLE_USER",
+        "runtime_engine": "STANDARD",
+        "autoscale": {
+          "min_workers": 2,
+          "max_workers": 8
+        }
+      }
+    }
+  ],
+  "format": "MULTI_TASK",
+  "schedule": {
+    "quartz_cron_expression": "0 0 2 * * ?",
+    "timezone_id": "Asia/Dubai",
+    "pause_status": "PAUSED"
+  }
+}

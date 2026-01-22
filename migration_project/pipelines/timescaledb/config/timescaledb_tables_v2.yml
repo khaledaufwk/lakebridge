@@ -1,0 +1,571 @@
+# TimescaleDB Table Registry - Version 2.0 (Optimized)
+# ================================================
+# Generated: 2026-01-21
+# Source: wakecap_app database
+#
+# IMPROVEMENTS IN THIS VERSION:
+# 1. Uses GREATEST(CreatedAt, UpdatedAt, DeletedAt) for comprehensive change tracking
+# 2. Excludes tables with complex JSON/binary data types
+# 3. Properly handles geometry columns with ST_AsText
+# 4. Optimized batch sizes for large tables
+# ================================================
+
+registry_version: '2.1'
+source_system: timescaledb
+source_database: wakecap_app
+target_catalog: wakecap_prod
+target_schema: raw
+generated_date: '2026-01-21'
+description: TimescaleDB bronze layer - optimized incremental load with GREATEST watermark
+
+defaults:
+  source_schema: public
+  watermark_type: timestamp
+  load_mode: incremental
+  merge_strategy: upsert
+  fetch_size: 50000
+  batch_size: 100000
+  enabled: true
+
+connection:
+  secret_scope: wakecap-timescale
+  driver: org.postgresql.Driver
+  ssl_mode: require
+
+metadata_columns:
+  - name: _loaded_at
+    expression: current_timestamp()
+  - name: _source_system
+    expression: "'timescaledb'"
+  - name: _source_table
+    expression: source_table_name
+
+# ============================================
+# EXCLUDED TABLES (complex JSON/binary types)
+# ============================================
+excluded_tables:
+  - source_table: AuditTrail
+    reason: "Contains complex JSON in Changes column - audit/logging table, not needed for analytics"
+    enabled: false
+
+  - source_table: MobileSyncRejectedActions
+    reason: "Contains complex JSON payload - sync debugging table"
+    enabled: false
+
+  - source_table: SGSAttendanceLogDebug
+    reason: "Debug/logging table with complex JSON structures"
+    enabled: false
+
+  - source_table: SGSIntegrationLog
+    reason: "Integration logging table with complex payloads"
+    enabled: false
+
+  - source_table: BulkUploadBatch
+    reason: "Contains binary file data and complex JSON"
+    enabled: false
+
+# ============================================
+# DIMENSION TABLES
+# ============================================
+tables:
+  # --- Core Dimensions ---
+  - source_table: Activity
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: Company
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: CompanyType
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true  # Small reference table
+
+  - source_table: Crew
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'), COALESCE(\"DeletedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: CrewComposition
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: CrewManager
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: CrewProductivityStatus
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true
+
+  - source_table: CrewType
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true
+
+  - source_table: DataGroup
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: DelayReason
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: Department
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: Discipline
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true
+
+  - source_table: Equipment
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: EquipmentType
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true
+
+  - source_table: ExpiryDuration
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true
+
+  - source_table: LocationGroup
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: Nationality
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true
+
+  - source_table: OBS
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: OBSCurrent
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+
+  - source_table: Package
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: People
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'), COALESCE(\"DeletedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: PeopleTitle
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true
+
+  - source_table: RegistrationType
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true
+
+  - source_table: Trade
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: Training
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: WorkArea
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: Workshift
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: WorkshiftDay
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: WorkshiftSchedule
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  - source_table: WorkshiftScheduleBreak
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+
+  - source_table: ZoneCategory
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true
+
+  # --- Geometry Tables (require ST_AsText conversion) ---
+  - source_table: Blueprint
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+    has_geometry: true
+    geometry_columns: [Geometry]
+    custom_query: |
+      SELECT *, ST_AsText("Geometry") as "GeometryWKT"
+      FROM "public"."Blueprint"
+      WHERE GREATEST(COALESCE("CreatedAt", '1900-01-01'), COALESCE("UpdatedAt", '1900-01-01')) > '{watermark}'
+
+  - source_table: Space
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+    has_geometry: true
+    geometry_columns: [Geometry]
+    custom_query: |
+      SELECT *, ST_AsText("Geometry") as "GeometryWKT"
+      FROM "public"."Space"
+      WHERE GREATEST(COALESCE("CreatedAt", '1900-01-01'), COALESCE("UpdatedAt", '1900-01-01')) > '{watermark}'
+
+  - source_table: Zone
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+    has_geometry: true
+    geometry_columns: [Geometry]
+    custom_query: |
+      SELECT *, ST_AsText("Geometry") as "GeometryWKT"
+      FROM "public"."Zone"
+      WHERE GREATEST(COALESCE("CreatedAt", '1900-01-01'), COALESCE("UpdatedAt", '1900-01-01')) > '{watermark}'
+
+  # --- Device Tables ---
+  - source_table: AvlDevice
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: dimensions
+
+  # --- Assignment/Bridge Tables ---
+  - source_table: AssignedWorkshiftAttendanceScope
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: CalendarPeriod
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: Certificate
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: CertificateType
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: assignments
+    is_full_load: true
+
+  - source_table: EquipmentCertificatesTypes
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: assignments
+
+  - source_table: EquipmentOperators
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: LocationGroupZone
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: ManualLocationAssignment
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: PermitActivity
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: ProgressDataGroup
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: ProgressDelayReason
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: ResourceDevice
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: TrainingSession
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: TrainingSessionTrainee
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: WorkPermit
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: WorkPermitActivity
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: WorkshiftResourceAssignment
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  - source_table: ZoneAuthorizedResource
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: assignments
+
+  # --- Fact Tables (Large, with optimized settings) ---
+  - source_table: AttendanceReportConsalidatedDay
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+    fetch_size: 50000
+    batch_size: 200000
+
+  - source_table: Co2Inspection
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+
+  - source_table: DeviceLocation
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+    has_geometry: true
+    geometry_columns: [Geometry]
+    fetch_size: 50000
+    batch_size: 200000
+
+  - source_table: DeviceLocationSummary
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+    has_geometry: true
+    geometry_columns: [Geometry]
+    fetch_size: 50000
+
+  - source_table: EquipmentTelemetry
+    primary_key_columns: [Id]
+    watermark_column: CreatedAt
+    category: facts
+    fetch_size: 100000
+    batch_size: 500000
+    is_hypertable: true
+
+  - source_table: Inspection
+    primary_key_columns: [Id]
+    watermark_column: CreatedAt
+    category: facts
+
+  - source_table: Plan
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+
+  - source_table: PlanProgress
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+
+  - source_table: PlanProgressDelayReason
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+
+  - source_table: PlanProgressResource
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+
+  - source_table: ResourceApprovedHour
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+
+  - source_table: ResourceApprovedHoursSegment
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+
+  - source_table: ResourceAttendance
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+    fetch_size: 50000
+
+  - source_table: ResourceHours
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+    fetch_size: 50000
+
+  - source_table: ResourceTimesheet
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+
+  - source_table: ResourceZone
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+    fetch_size: 100000
+    batch_size: 500000
+
+  - source_table: SGSAttendanceLog
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+
+  - source_table: SGSRosterWorkshiftLog
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+
+  - source_table: ViewFactWorkshiftsCache
+    primary_key_columns: [Id]
+    watermark_column: WatermarkUTC
+    category: facts
+    fetch_size: 100000
+    batch_size: 500000
+    is_hypertable: true
+    comment: "Pre-aggregated workshift facts - very large table"
+
+  # --- History Tables (Geometry with ST_AsText) ---
+  - source_table: SpaceHistory
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: history
+    has_geometry: true
+    geometry_columns: [Geometry]
+
+  - source_table: ZoneHistory
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: history
+    has_geometry: true
+    geometry_columns: [Geometry]
+
+  - source_table: ZoneViolationLog
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: history
+    has_geometry: true
+    geometry_columns: [Geometry]
+
+  - source_table: NovadeWorkPermit
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+    has_geometry: true
+    geometry_columns: [Geometry]

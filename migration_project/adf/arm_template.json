@@ -1,0 +1,560 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "factoryName": {
+      "type": "string",
+      "defaultValue": "wakecap-adf",
+      "metadata": {
+        "description": "Data Factory name"
+      }
+    },
+    "sqlServerConnectionString": {
+      "type": "securestring",
+      "metadata": {
+        "description": "SQL Server connection string"
+      }
+    },
+    "adlsAccountName": {
+      "type": "string",
+      "defaultValue": "wakecapadls",
+      "metadata": {
+        "description": "ADLS Gen2 storage account name"
+      }
+    },
+    "adlsAccountKey": {
+      "type": "securestring",
+      "metadata": {
+        "description": "ADLS Gen2 storage account key"
+      }
+    }
+  },
+  "variables": {
+    "factoryId": "[concat('Microsoft.DataFactory/factories/', parameters('factoryName'))]",
+    "sqlServerLinkedService": "WakeCapDW_SqlServer",
+    "adlsLinkedService": "WakeCapADLS_Gen2"
+  },
+  "resources": [
+    {
+      "name": "[concat(parameters('factoryName'), '/', variables('sqlServerLinkedService'))]",
+      "type": "Microsoft.DataFactory/factories/linkedServices",
+      "apiVersion": "2018-06-01",
+      "properties": {
+        "type": "AzureSqlDatabase",
+        "typeProperties": {
+          "connectionString": "[parameters('sqlServerConnectionString')]"
+        }
+      }
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/', variables('adlsLinkedService'))]",
+      "type": "Microsoft.DataFactory/factories/linkedServices",
+      "apiVersion": "2018-06-01",
+      "properties": {
+        "type": "AzureBlobFS",
+        "typeProperties": {
+          "url": "[concat('https://', parameters('adlsAccountName'), '.dfs.core.windows.net')]",
+          "accountKey": {
+            "type": "SecureString",
+            "value": "[parameters('adlsAccountKey')]"
+          }
+        }
+      }
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/SqlServerSource')]",
+      "type": "Microsoft.DataFactory/factories/datasets",
+      "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[concat(variables('factoryId'), '/linkedServices/', variables('sqlServerLinkedService'))]"
+      ],
+      "properties": {
+        "linkedServiceName": {
+          "referenceName": "[variables('sqlServerLinkedService')]",
+          "type": "LinkedServiceReference"
+        },
+        "parameters": {
+          "schemaName": {
+            "type": "string"
+          },
+          "tableName": {
+            "type": "string"
+          }
+        },
+        "type": "AzureSqlTable",
+        "typeProperties": {
+          "schema": {
+            "value": "@dataset().schemaName",
+            "type": "Expression"
+          },
+          "table": {
+            "value": "@dataset().tableName",
+            "type": "Expression"
+          }
+        }
+      }
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/AdlsParquetSink')]",
+      "type": "Microsoft.DataFactory/factories/datasets",
+      "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[concat(variables('factoryId'), '/linkedServices/', variables('adlsLinkedService'))]"
+      ],
+      "properties": {
+        "linkedServiceName": {
+          "referenceName": "[variables('adlsLinkedService')]",
+          "type": "LinkedServiceReference"
+        },
+        "parameters": {
+          "containerName": {
+            "type": "string"
+          },
+          "folderPath": {
+            "type": "string"
+          }
+        },
+        "type": "Parquet",
+        "typeProperties": {
+          "location": {
+            "type": "AzureBlobFSLocation",
+            "folderPath": {
+              "value": "@dataset().folderPath",
+              "type": "Expression"
+            },
+            "fileSystem": {
+              "value": "@dataset().containerName",
+              "type": "Expression"
+            }
+          },
+          "compressionCodec": "snappy"
+        }
+      }
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/WakeCapDW_FullExtract')]",
+      "type": "Microsoft.DataFactory/factories/pipelines",
+      "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[concat(variables('factoryId'), '/datasets/SqlServerSource')]",
+        "[concat(variables('factoryId'), '/datasets/AdlsParquetSink')]"
+      ],
+      "properties": {
+        "activities": [
+          {
+            "name": "ExtractDimensions",
+            "type": "ForEach",
+            "typeProperties": {
+              "isSequential": false,
+              "batchCount": 10,
+              "items": {
+                "value": "@pipeline().parameters.dimensionTables",
+                "type": "Expression"
+              },
+              "activities": [
+                {
+                  "name": "CopyDimension",
+                  "type": "Copy",
+                  "typeProperties": {
+                    "source": {
+                      "type": "AzureSqlSource",
+                      "sqlReaderQuery": {
+                        "value": "SELECT * FROM [@{item().schema}].[@{item().name}]",
+                        "type": "Expression"
+                      }
+                    },
+                    "sink": {
+                      "type": "ParquetSink"
+                    },
+                    "enableStaging": false
+                  },
+                  "inputs": [
+                    {
+                      "referenceName": "SqlServerSource",
+                      "type": "DatasetReference",
+                      "parameters": {
+                        "schemaName": {
+                          "value": "@item().schema",
+                          "type": "Expression"
+                        },
+                        "tableName": {
+                          "value": "@item().name",
+                          "type": "Expression"
+                        }
+                      }
+                    }
+                  ],
+                  "outputs": [
+                    {
+                      "referenceName": "AdlsParquetSink",
+                      "type": "DatasetReference",
+                      "parameters": {
+                        "containerName": "raw",
+                        "folderPath": {
+                          "value": "@concat('wakecap/', item().category, '/', item().name, '/')",
+                          "type": "Expression"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "ExtractAssignments",
+            "type": "ForEach",
+            "dependsOn": [
+              {
+                "activity": "ExtractDimensions",
+                "dependencyConditions": ["Succeeded"]
+              }
+            ],
+            "typeProperties": {
+              "isSequential": false,
+              "batchCount": 8,
+              "items": {
+                "value": "@pipeline().parameters.assignmentTables",
+                "type": "Expression"
+              },
+              "activities": [
+                {
+                  "name": "CopyAssignment",
+                  "type": "Copy",
+                  "typeProperties": {
+                    "source": {
+                      "type": "AzureSqlSource",
+                      "sqlReaderQuery": {
+                        "value": "SELECT * FROM [@{item().schema}].[@{item().name}]",
+                        "type": "Expression"
+                      }
+                    },
+                    "sink": {
+                      "type": "ParquetSink"
+                    },
+                    "enableStaging": false
+                  },
+                  "inputs": [
+                    {
+                      "referenceName": "SqlServerSource",
+                      "type": "DatasetReference",
+                      "parameters": {
+                        "schemaName": {
+                          "value": "@item().schema",
+                          "type": "Expression"
+                        },
+                        "tableName": {
+                          "value": "@item().name",
+                          "type": "Expression"
+                        }
+                      }
+                    }
+                  ],
+                  "outputs": [
+                    {
+                      "referenceName": "AdlsParquetSink",
+                      "type": "DatasetReference",
+                      "parameters": {
+                        "containerName": "raw",
+                        "folderPath": {
+                          "value": "@concat('wakecap/', item().category, '/', item().name, '/')",
+                          "type": "Expression"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "name": "ExtractFacts",
+            "type": "ForEach",
+            "dependsOn": [
+              {
+                "activity": "ExtractAssignments",
+                "dependencyConditions": ["Succeeded"]
+              }
+            ],
+            "typeProperties": {
+              "isSequential": false,
+              "batchCount": 4,
+              "items": {
+                "value": "@pipeline().parameters.factTables",
+                "type": "Expression"
+              },
+              "activities": [
+                {
+                  "name": "CopyFact",
+                  "type": "Copy",
+                  "typeProperties": {
+                    "source": {
+                      "type": "AzureSqlSource",
+                      "sqlReaderQuery": {
+                        "value": "SELECT * FROM [@{item().schema}].[@{item().name}]",
+                        "type": "Expression"
+                      },
+                      "partitionOption": {
+                        "value": "@if(not(empty(item().partitionColumn)), 'DynamicRange', 'None')",
+                        "type": "Expression"
+                      }
+                    },
+                    "sink": {
+                      "type": "ParquetSink"
+                    },
+                    "enableStaging": false,
+                    "parallelCopies": 8
+                  },
+                  "inputs": [
+                    {
+                      "referenceName": "SqlServerSource",
+                      "type": "DatasetReference",
+                      "parameters": {
+                        "schemaName": {
+                          "value": "@item().schema",
+                          "type": "Expression"
+                        },
+                        "tableName": {
+                          "value": "@item().name",
+                          "type": "Expression"
+                        }
+                      }
+                    }
+                  ],
+                  "outputs": [
+                    {
+                      "referenceName": "AdlsParquetSink",
+                      "type": "DatasetReference",
+                      "parameters": {
+                        "containerName": "raw",
+                        "folderPath": {
+                          "value": "@concat('wakecap/', item().category, '/', item().name, '/')",
+                          "type": "Expression"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ],
+        "parameters": {
+          "dimensionTables": {
+            "type": "array",
+            "defaultValue": [
+              {"name": "Organization", "schema": "dbo", "category": "dimensions"},
+              {"name": "Project", "schema": "dbo", "category": "dimensions"},
+              {"name": "Worker", "schema": "dbo", "category": "dimensions"},
+              {"name": "Crew", "schema": "dbo", "category": "dimensions"},
+              {"name": "Trade", "schema": "dbo", "category": "dimensions"},
+              {"name": "Company", "schema": "dbo", "category": "dimensions"},
+              {"name": "Floor", "schema": "dbo", "category": "dimensions"},
+              {"name": "Zone", "schema": "dbo", "category": "dimensions"},
+              {"name": "Device", "schema": "dbo", "category": "dimensions"},
+              {"name": "Workshift", "schema": "dbo", "category": "dimensions"},
+              {"name": "WorkshiftDetails", "schema": "dbo", "category": "dimensions"},
+              {"name": "Activity", "schema": "dbo", "category": "dimensions"},
+              {"name": "LocationGroup", "schema": "dbo", "category": "dimensions"},
+              {"name": "Department", "schema": "dbo", "category": "dimensions"},
+              {"name": "Title", "schema": "dbo", "category": "dimensions"},
+              {"name": "ObservationSource", "schema": "dbo", "category": "dimensions"}
+            ]
+          },
+          "assignmentTables": {
+            "type": "array",
+            "defaultValue": [
+              {"name": "CrewAssignments", "schema": "dbo", "category": "assignments"},
+              {"name": "TradeAssignments", "schema": "dbo", "category": "assignments"},
+              {"name": "WorkshiftAssignments", "schema": "dbo", "category": "assignments"},
+              {"name": "DeviceAssignments", "schema": "dbo", "category": "assignments"},
+              {"name": "ManagerAssignments", "schema": "dbo", "category": "assignments"},
+              {"name": "ManagerAssignmentSnapshots", "schema": "dbo", "category": "assignments"},
+              {"name": "LocationGroupAssignments", "schema": "dbo", "category": "assignments"},
+              {"name": "WorkerLocationAssignments", "schema": "dbo", "category": "assignments"}
+            ]
+          },
+          "factTables": {
+            "type": "array",
+            "defaultValue": [
+              {"name": "FactWorkersHistory", "schema": "dbo", "category": "facts", "partitionColumn": "LocalDate"},
+              {"name": "FactWorkersShifts", "schema": "dbo", "category": "facts", "partitionColumn": "ShiftLocalDate"},
+              {"name": "FactWorkersShiftsCombined", "schema": "dbo", "category": "facts", "partitionColumn": "ShiftLocalDate"},
+              {"name": "FactReportedAttendance", "schema": "dbo", "category": "facts", "partitionColumn": "ShiftLocalDate"},
+              {"name": "FactObservations", "schema": "dbo", "category": "facts", "partitionColumn": null},
+              {"name": "FactProgress", "schema": "dbo", "category": "facts", "partitionColumn": "ProgressDate"},
+              {"name": "FactWeatherObservations", "schema": "dbo", "category": "facts", "partitionColumn": null},
+              {"name": "FactWorkersContacts", "schema": "dbo", "category": "facts", "partitionColumn": "LocalDate"},
+              {"name": "FactWorkersTasks", "schema": "dbo", "category": "facts", "partitionColumn": null}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "[concat(parameters('factoryName'), '/WakeCapDW_IncrementalExtract')]",
+      "type": "Microsoft.DataFactory/factories/pipelines",
+      "apiVersion": "2018-06-01",
+      "dependsOn": [
+        "[concat(variables('factoryId'), '/datasets/SqlServerSource')]",
+        "[concat(variables('factoryId'), '/datasets/AdlsParquetSink')]"
+      ],
+      "properties": {
+        "activities": [
+          {
+            "name": "GetHighWatermark",
+            "type": "Lookup",
+            "typeProperties": {
+              "source": {
+                "type": "AzureSqlSource",
+                "sqlReaderQuery": "SELECT MAX(WatermarkUTC) as LastWatermark FROM stg.SyncState WHERE TableName = '@{pipeline().parameters.tableName}'"
+              },
+              "dataset": {
+                "referenceName": "SqlServerSource",
+                "type": "DatasetReference",
+                "parameters": {
+                  "schemaName": "stg",
+                  "tableName": "SyncState"
+                }
+              }
+            }
+          },
+          {
+            "name": "GetCurrentWatermark",
+            "type": "Lookup",
+            "dependsOn": [
+              {
+                "activity": "GetHighWatermark",
+                "dependencyConditions": ["Succeeded"]
+              }
+            ],
+            "typeProperties": {
+              "source": {
+                "type": "AzureSqlSource",
+                "sqlReaderQuery": {
+                  "value": "SELECT MAX(@{pipeline().parameters.incrementalColumn}) as CurrentWatermark FROM [@{pipeline().parameters.schemaName}].[@{pipeline().parameters.tableName}]",
+                  "type": "Expression"
+                }
+              },
+              "dataset": {
+                "referenceName": "SqlServerSource",
+                "type": "DatasetReference",
+                "parameters": {
+                  "schemaName": {
+                    "value": "@pipeline().parameters.schemaName",
+                    "type": "Expression"
+                  },
+                  "tableName": {
+                    "value": "@pipeline().parameters.tableName",
+                    "type": "Expression"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "name": "CopyIncrementalData",
+            "type": "Copy",
+            "dependsOn": [
+              {
+                "activity": "GetCurrentWatermark",
+                "dependencyConditions": ["Succeeded"]
+              }
+            ],
+            "typeProperties": {
+              "source": {
+                "type": "AzureSqlSource",
+                "sqlReaderQuery": {
+                  "value": "SELECT * FROM [@{pipeline().parameters.schemaName}].[@{pipeline().parameters.tableName}] WHERE @{pipeline().parameters.incrementalColumn} > '@{activity('GetHighWatermark').output.firstRow.LastWatermark}' AND @{pipeline().parameters.incrementalColumn} <= '@{activity('GetCurrentWatermark').output.firstRow.CurrentWatermark}'",
+                  "type": "Expression"
+                }
+              },
+              "sink": {
+                "type": "ParquetSink"
+              },
+              "enableStaging": false
+            },
+            "inputs": [
+              {
+                "referenceName": "SqlServerSource",
+                "type": "DatasetReference",
+                "parameters": {
+                  "schemaName": {
+                    "value": "@pipeline().parameters.schemaName",
+                    "type": "Expression"
+                  },
+                  "tableName": {
+                    "value": "@pipeline().parameters.tableName",
+                    "type": "Expression"
+                  }
+                }
+              }
+            ],
+            "outputs": [
+              {
+                "referenceName": "AdlsParquetSink",
+                "type": "DatasetReference",
+                "parameters": {
+                  "containerName": "raw",
+                  "folderPath": {
+                    "value": "@concat('wakecap/', pipeline().parameters.category, '/', pipeline().parameters.tableName, '/incremental/', formatDateTime(utcNow(), 'yyyy-MM-dd-HH-mm'), '/')",
+                    "type": "Expression"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "name": "UpdateWatermark",
+            "type": "SqlServerStoredProcedure",
+            "dependsOn": [
+              {
+                "activity": "CopyIncrementalData",
+                "dependencyConditions": ["Succeeded"]
+              }
+            ],
+            "typeProperties": {
+              "storedProcedureName": "stg.spUpdateSyncState",
+              "storedProcedureParameters": {
+                "TableName": {
+                  "value": {
+                    "value": "@pipeline().parameters.tableName",
+                    "type": "Expression"
+                  },
+                  "type": "String"
+                },
+                "WatermarkValue": {
+                  "value": {
+                    "value": "@activity('GetCurrentWatermark').output.firstRow.CurrentWatermark",
+                    "type": "Expression"
+                  },
+                  "type": "DateTime"
+                }
+              }
+            },
+            "linkedServiceName": {
+              "referenceName": "[variables('sqlServerLinkedService')]",
+              "type": "LinkedServiceReference"
+            }
+          }
+        ],
+        "parameters": {
+          "tableName": {
+            "type": "string"
+          },
+          "schemaName": {
+            "type": "string",
+            "defaultValue": "dbo"
+          },
+          "incrementalColumn": {
+            "type": "string",
+            "defaultValue": "WatermarkUTC"
+          },
+          "category": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

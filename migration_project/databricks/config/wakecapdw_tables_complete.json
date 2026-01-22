@@ -1,0 +1,1029 @@
+{
+  "metadata": {
+    "description": "Complete WakeCapDW Table Configuration for Databricks Incremental Load",
+    "source_system": "wakecapdw",
+    "source_database": "WakeCapDW_20251215",
+    "source_server": "wakecap24.database.windows.net",
+    "target_catalog": "wakecap_prod",
+    "target_schema": "raw",
+    "total_tables": 136,
+    "skipped_tables": 6
+  },
+  "connection": {
+    "secret_scope": "akv-wakecap24",
+    "source_driver": "com.microsoft.sqlserver.jdbc.SQLServerDriver",
+    "source_user": "wakecap_reader",
+    "source_pwd_secret_name": "sqlserver-wakecap-password",
+    "source_url": "jdbc:sqlserver://wakecap24.database.windows.net:1433"
+  },
+  "tables": {
+    "dimensions": [
+      {
+        "source_schema": "dbo",
+        "source_table": "Activity",
+        "primary_key_columns": "ActivityID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Company",
+        "primary_key_columns": "CompanyID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "ContactTracingRule",
+        "primary_key_columns": "ContactTracingRuleID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Crew",
+        "primary_key_columns": "CrewID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Department",
+        "primary_key_columns": "DepartmentID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Device",
+        "primary_key_columns": "DeviceID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "ExtSource",
+        "primary_key_columns": "ExtSourceID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Floor",
+        "primary_key_columns": "FloorID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false,
+        "has_geometry": true,
+        "note": "Contains geography/geometry columns - may need special handling"
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "LocationGroup",
+        "primary_key_columns": "LocationGroupID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "ObservationClinicViolationStatus",
+        "primary_key_columns": "ObservationClinicViolationStatus",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "ObservationDiscriminator",
+        "primary_key_columns": "ObservationDiscriminator",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "ObservationSeverity",
+        "primary_key_columns": "ObservationSeverity",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "ObservationSource",
+        "primary_key_columns": "ObservationSource",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "ObservationStatus",
+        "primary_key_columns": "ObservationStatus",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "ObservationType",
+        "primary_key_columns": "ObservationType",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Organization",
+        "primary_key_columns": "OrganizationID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "ProductiveClass",
+        "primary_key_columns": "ProductiveClassID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Project",
+        "primary_key_columns": "ProjectID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "ShiftTimeCategory",
+        "primary_key_columns": "TimeCategoryID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Stats",
+        "primary_key_columns": "Metric",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Task",
+        "primary_key_columns": "TaskID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "TimeZoneMapping",
+        "primary_key_columns": "TimeZoneMappingID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Title",
+        "primary_key_columns": "TitleID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Trade",
+        "primary_key_columns": "TradeID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Work",
+        "primary_key_columns": "WorkID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Worker",
+        "primary_key_columns": "WorkerID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "WorkerStatus",
+        "primary_key_columns": "WorkerStatusID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Workshift",
+        "primary_key_columns": "WorkshiftID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "WorkshiftDetails",
+        "primary_key_columns": "WorkshiftDetailsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "Zone",
+        "primary_key_columns": "ZoneID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false,
+        "has_geometry": true,
+        "note": "Contains geography/geometry columns - may need special handling"
+      }
+    ],
+    "facts": [
+      {
+        "source_schema": "dbo",
+        "source_table": "FactObservations",
+        "primary_key_columns": "ObservationID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "FactProgress",
+        "primary_key_columns": "FactProgressID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "FactReportedAttendance",
+        "primary_key_columns": "FactReportedAttendanceID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "FactWeatherObservations",
+        "primary_key_columns": "FactWeatherObservationsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "FactWorkersContacts",
+        "primary_key_columns": "FactWorkersContactsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "FactWorkersHistory",
+        "primary_key_columns": "FactWorkersHistoryID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false,
+        "has_geometry": true,
+        "note": "Contains geography/geometry columns - may need special handling"
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "FactWorkersShifts",
+        "primary_key_columns": "FactWorkersShiftsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "FactWorkersShiftsCombined",
+        "primary_key_columns": "FactShiftID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "FactWorkersTasks",
+        "primary_key_columns": "FactWorkersTasksID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      }
+    ],
+    "assignments": [
+      {
+        "source_schema": "dbo",
+        "source_table": "CrewAssignments",
+        "primary_key_columns": "CrewAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "DeviceAssignments",
+        "primary_key_columns": "DeviceAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "LocationAssignmentClass",
+        "primary_key_columns": "LocationAssignmentClassID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "LocationGroupAssignments",
+        "primary_key_columns": "LocationGroupAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "ManagerAssignments",
+        "primary_key_columns": "ManagerAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "ManagerAssignmentSnapshots",
+        "primary_key_columns": "ManagerAssignmentSnapshotID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "TradeAssignments",
+        "primary_key_columns": "TradeAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "WorkerLocationAssignments",
+        "primary_key_columns": "WorkerLocationAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "dbo",
+        "source_table": "WorkshiftAssignments",
+        "primary_key_columns": "WorkshiftAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      }
+    ],
+    "staging": [
+      {
+        "source_schema": "stg",
+        "source_table": "ImpactedAreaLog",
+        "primary_key_columns": "ImpactedAreaLogID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "SyncState",
+        "primary_key_columns": "SyncStateID",
+        "watermark_column": null,
+        "is_full_load": true
+      }
+    ],
+    "staging_sources": [
+      {
+        "source_schema": "stg",
+        "source_table": "wc2021_worker_activity_assignments",
+        "primary_key_columns": "id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2021_worker_activity_assignments_stalled",
+        "primary_key_columns": "id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_asset_location",
+        "primary_key_columns": "wc2023_asset_locationID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_asset_location_stalled",
+        "primary_key_columns": "wc2023_asset_location_stalledID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_Company",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_Crew",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_CrewComposition",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_CrewComposition_full",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_CrewManagerAssignments",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_CrewManagerAssignments_full",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_DataGroup",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_DelayReason",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_Department",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_LocationGroup",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_LocationGroupZone",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_ManualLocationAssignment",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_ManualLocationAssignment_full",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_node",
+        "primary_key_columns": "id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_OBS",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_OBS_full",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_observation_ClinicViolationStatus",
+        "primary_key_columns": "Name",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_observation_Discriminator",
+        "primary_key_columns": "Name",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_observation_Observations",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_observation_Observations_stalled",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_observation_Severity",
+        "primary_key_columns": "Name",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_observation_Source",
+        "primary_key_columns": "Name",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_observation_Status",
+        "primary_key_columns": "Name",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_observation_Type",
+        "primary_key_columns": "Name",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_organization",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_People",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_PeopleTitle",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_PermissionsQuery",
+        "primary_key_columns": "wc2023_PermissionsQueryID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_Project",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_ResourceDevice",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_ResourceDevice_full",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_ResourceHours",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_ResourceHours_full",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_ResourceTimesheet",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_ResourceTimesheet_full",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_ResourceZone",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_ResourceZone_full",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_Space",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_Trade",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_weather_station_sensor",
+        "primary_key_columns": "wc2023_weather_station_sensorID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_weather_station_sensor_stalled",
+        "primary_key_columns": "wc2023_weather_station_sensor_stalledID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_Workshift",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_WorkshiftResourceAssignment",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_WorkshiftResourceAssignment_full",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_WorkshiftSchedule",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "stg",
+        "source_table": "wc2023_Zone",
+        "primary_key_columns": "Id",
+        "watermark_column": null,
+        "is_full_load": true
+      }
+    ],
+    "merge": [
+      {
+        "source_schema": "mrg",
+        "source_table": "Activity",
+        "primary_key_columns": "ActivityID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "Building",
+        "primary_key_columns": "BuildingID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "ContactTracingRule",
+        "primary_key_columns": "ContactTracingRuleID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "Contractor",
+        "primary_key_columns": "ContractorID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "Crew",
+        "primary_key_columns": "CrewID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "CrewAssignments",
+        "primary_key_columns": "CrewAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "FactReportedAttendance",
+        "primary_key_columns": "FactReportedAttendanceID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "FactWorkersContacts",
+        "primary_key_columns": "FactWorkersContactsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "FactWorkersHistory",
+        "primary_key_columns": "FactWorkersHistoryID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "FactWorkersShifts",
+        "primary_key_columns": "FactWorkersShiftsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "FactWorkersShiftsCombined",
+        "primary_key_columns": "FactWorkersShiftsCombinedID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "FactWorkersTasks",
+        "primary_key_columns": "FactWorkersTasksID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "Floor",
+        "primary_key_columns": "FloorID",
+        "watermark_column": null,
+        "is_full_load": true,
+        "has_geometry": true,
+        "note": "Contains geography/geometry columns - may need special handling"
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "InventoryAssignments",
+        "primary_key_columns": "InventoryAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "LocationGroup",
+        "primary_key_columns": "LocationGroupID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "LocationGroupAssignments",
+        "primary_key_columns": "LocationGroupAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "ManagerAssignments",
+        "primary_key_columns": "ManagerAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "ManagerAssignmentSnapshots",
+        "primary_key_columns": "ManagerAssignmentSnapshotsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "Organization",
+        "primary_key_columns": "OrganizationID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "Project",
+        "primary_key_columns": "ProjectID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "Task",
+        "primary_key_columns": "TaskID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "Worker",
+        "primary_key_columns": "WorkerID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "WorkerLocationAssignments",
+        "primary_key_columns": "WorkerLocationAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "WorkerRole",
+        "primary_key_columns": "WorkerRoleID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "WorkerRoleAssignments",
+        "primary_key_columns": "WorkerRoleAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "WorkerStatus",
+        "primary_key_columns": "WorkerStatusID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "WorkerStatusAssignments",
+        "primary_key_columns": "WorkerStatusAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "WorkShift",
+        "primary_key_columns": "WorkShiftID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "WorkShiftAssignments",
+        "primary_key_columns": "WorkShiftAssignmentsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "WorkShiftDetails",
+        "primary_key_columns": "WorkShiftDetailsID",
+        "watermark_column": null,
+        "is_full_load": true
+      },
+      {
+        "source_schema": "mrg",
+        "source_table": "Zone",
+        "primary_key_columns": "ZoneID",
+        "watermark_column": null,
+        "is_full_load": true,
+        "has_geometry": true,
+        "note": "Contains geography/geometry columns - may need special handling"
+      }
+    ],
+    "security": [
+      {
+        "source_schema": "security",
+        "source_table": "UserPermissions",
+        "primary_key_columns": "UserPermissionsID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "security",
+        "source_table": "UserPermissionsCompany",
+        "primary_key_columns": "UserPermissionsCompanyID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "security",
+        "source_table": "UserPermissionsCrew",
+        "primary_key_columns": "UserPermissionsCrewID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "security",
+        "source_table": "UserPermissionsOrganization",
+        "primary_key_columns": "UserPermissionsOrganizationID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      },
+      {
+        "source_schema": "security",
+        "source_table": "UserPermissionsProject",
+        "primary_key_columns": "UserPermissionsProjectID",
+        "watermark_column": "WatermarkUTC",
+        "is_full_load": false
+      }
+    ]
+  },
+  "skipped_tables": [
+    {
+      "source_schema": "dbo",
+      "source_table": "__RefactorLog",
+      "reason": "System/test table"
+    },
+    {
+      "source_schema": "dbo",
+      "source_table": "Crew2",
+      "reason": "System/test table"
+    },
+    {
+      "source_schema": "dbo",
+      "source_table": "Crew_CopyTable_Test",
+      "reason": "System/test table"
+    },
+    {
+      "source_schema": "mrg",
+      "source_table": "tmp_WorkerMapping",
+      "reason": "System/test table"
+    },
+    {
+      "source_schema": "mrg",
+      "source_table": "tmp_WorkshiftDetailsMapping",
+      "reason": "System/test table"
+    },
+    {
+      "source_schema": "mrg",
+      "source_table": "tmp_WorkshiftMapping",
+      "reason": "System/test table"
+    }
+  ]
+}

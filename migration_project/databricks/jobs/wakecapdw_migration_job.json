@@ -1,0 +1,131 @@
+{
+  "name": "WakeCapDW_Migration_Incremental",
+  "description": "Incremental data load from WakeCapDW SQL Server to Databricks Delta Lake",
+  "email_notifications": {
+    "on_failure": ["data-team@wakecap.com"],
+    "no_alert_for_skipped_runs": true
+  },
+  "webhook_notifications": {},
+  "timeout_seconds": 14400,
+  "max_concurrent_runs": 1,
+  "tasks": [
+    {
+      "task_key": "raw_dimensions",
+      "description": "Load dimension tables from WakeCapDW",
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/wakecapdw_orchestrator",
+        "base_parameters": {
+          "category": "dimensions",
+          "parallel_tasks": "4",
+          "timeout_seconds": "1800",
+          "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_migration_cluster",
+      "timeout_seconds": 3600,
+      "email_notifications": {}
+    },
+    {
+      "task_key": "raw_assignments",
+      "description": "Load assignment tables from WakeCapDW",
+      "depends_on": [
+        {"task_key": "raw_dimensions"}
+      ],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/wakecapdw_orchestrator",
+        "base_parameters": {
+          "category": "assignments",
+          "parallel_tasks": "4",
+          "timeout_seconds": "1800",
+          "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_migration_cluster",
+      "timeout_seconds": 3600,
+      "email_notifications": {}
+    },
+    {
+      "task_key": "raw_facts",
+      "description": "Load fact tables from WakeCapDW",
+      "depends_on": [
+        {"task_key": "raw_assignments"}
+      ],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/wakecapdw_orchestrator",
+        "base_parameters": {
+          "category": "facts",
+          "parallel_tasks": "2",
+          "timeout_seconds": "3600",
+          "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_migration_cluster",
+      "timeout_seconds": 7200,
+      "email_notifications": {}
+    },
+    {
+      "task_key": "raw_other",
+      "description": "Load other tables from WakeCapDW",
+      "depends_on": [
+        {"task_key": "raw_facts"}
+      ],
+      "notebook_task": {
+        "notebook_path": "/Workspace/WakeCapDW/notebooks/wakecapdw_orchestrator",
+        "base_parameters": {
+          "category": "other",
+          "parallel_tasks": "2",
+          "timeout_seconds": "1800",
+          "notebook_path": "/Workspace/WakeCapDW/notebooks/sqlserver_incremental_load"
+        },
+        "source": "WORKSPACE"
+      },
+      "job_cluster_key": "wakecap_migration_cluster",
+      "timeout_seconds": 3600,
+      "email_notifications": {}
+    }
+  ],
+  "job_clusters": [
+    {
+      "job_cluster_key": "wakecap_migration_cluster",
+      "new_cluster": {
+        "spark_version": "14.3.x-scala2.12",
+        "azure_attributes": {
+          "first_on_demand": 1,
+          "availability": "ON_DEMAND_AZURE",
+          "spot_bid_max_price": -1
+        },
+        "node_type_id": "Standard_DS3_v2",
+        "spark_env_vars": {
+          "PYSPARK_PYTHON": "/databricks/python3/bin/python3"
+        },
+        "enable_elastic_disk": true,
+        "data_security_mode": "SINGLE_USER",
+        "runtime_engine": "STANDARD",
+        "autoscale": {
+          "min_workers": 2,
+          "max_workers": 8
+        },
+        "spark_conf": {
+          "spark.databricks.delta.preview.enabled": "true"
+        }
+      }
+    }
+  ],
+  "queue": {
+    "enabled": true
+  },
+  "format": "MULTI_TASK",
+  "schedule": {
+    "quartz_cron_expression": "0 0 2 * * ?",
+    "timezone_id": "Asia/Dubai",
+    "pause_status": "PAUSED"
+  },
+  "tags": {
+    "project": "wakecap_migration",
+    "source": "sqlserver",
+    "environment": "production"
+  }
+}

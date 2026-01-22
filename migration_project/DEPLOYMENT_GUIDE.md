@@ -6,107 +6,104 @@ This guide provides step-by-step instructions for deploying the WakeCapDW migrat
 
 ### Azure Resources
 - Azure SQL Server with WakeCapDW_20251215 database
-- Azure Data Factory (or create new)
-- ADLS Gen2 storage account with `raw` container
 - Databricks workspace with Unity Catalog enabled
+- Azure Key Vault for secrets management
 
 ### Access Requirements
-- Azure subscription contributor access
 - Databricks workspace admin access
 - SQL Server read access
-- ADLS Storage Blob Data Contributor role
+- Azure Key Vault access
 
 ### Tools
-- Azure CLI (`az`) or Azure PowerShell
 - Databricks CLI (`databricks`)
-- Python 3.9+ (optional, for SDK deployment)
+- Python 3.9+ with `databricks-sdk` package
 
 ---
 
-## Phase 1: ADF Pipeline Deployment
+## Phase 1: Databricks Direct Ingestion (Replaces ADF)
 
-### 1.1 Configure Credentials
+The migration uses **Databricks notebooks with JDBC** to read directly from SQL Server, eliminating the need for Azure Data Factory.
 
-Create a `credentials.env` file (DO NOT commit to git):
+### Architecture
+
+```
+┌─────────────────┐     JDBC      ┌─────────────────┐
+│  SQL Server     │ ────────────> │   Databricks    │
+│  WakeCapDW      │               │   Delta Lake    │
+└─────────────────┘               └─────────────────┘
+                                        │
+                                        ▼
+                              ┌─────────────────────┐
+                              │  wakecap_prod.raw   │
+                              │  (Delta Tables)     │
+                              └─────────────────────┘
+```
+
+### 1.1 Configure Azure Key Vault Secrets
+
+Create the following secrets in your Key Vault scope (`akv-wakecap24`):
 
 ```bash
-# SQL Server Connection
-SQL_CONNECTION_STRING="Server=tcp:your-server.database.windows.net,1433;Initial Catalog=WakeCapDW_20251215;..."
+# Using Databricks CLI
+databricks secrets create-scope akv-wakecap24 --scope-backend-type AZURE_KEYVAULT \
+    --resource-id /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.KeyVault/vaults/{vault}
 
-# ADLS Gen2
-ADLS_ACCOUNT_NAME="wakecapadls"
-ADLS_ACCOUNT_KEY="your-account-key"
-
-# Resource Group
-RESOURCE_GROUP="wakecap-data-rg"
-ADF_NAME="wakecap-adf"
+# Or using Azure CLI to add secrets to Key Vault
+az keyvault secret set --vault-name wakecap24 \
+    --name sqlserver-wakecap-password \
+    --value "your-sql-server-password"
 ```
 
-### 1.2 Deploy ADF Pipelines
+### 1.2 Deploy Ingestion Notebooks
 
-**Option A: PowerShell**
-```powershell
-cd migration_project/adf
-
-# Load credentials
-. ./credentials.env
-
-# Deploy
-./deploy_adf.ps1 `
-    -ResourceGroupName $RESOURCE_GROUP `
-    -FactoryName $ADF_NAME `
-    -SqlConnectionString $SQL_CONNECTION_STRING `
-    -AdlsAccountName $ADLS_ACCOUNT_NAME `
-    -AdlsAccountKey $ADLS_ACCOUNT_KEY
-```
-
-**Option B: Azure CLI**
+**Option A: Python Script**
 ```bash
-# Deploy ARM template
-az deployment group create \
-    --resource-group wakecap-data-rg \
-    --template-file arm_template.json \
-    --parameters factoryName=wakecap-adf \
-    --parameters sqlServerConnectionString="$SQL_CONNECTION_STRING" \
-    --parameters adlsAccountName=wakecapadls \
-    --parameters adlsAccountKey="$ADLS_ACCOUNT_KEY"
+cd migration_project/databricks
+
+pip install databricks-sdk
+
+python deploy_ingestion_pipeline.py \
+    --host https://adb-3022397433351638.18.azuredatabricks.net \
+    --token <your-pat-token> \
+    --job-type orchestrator
 ```
 
-### 1.3 Run Initial Data Extract
-
-1. Open Azure Portal > Data Factory > wakecap-adf
-2. Click "Author & Monitor"
-3. Navigate to Pipelines > WakeCapDW_FullExtract
-4. Click "Add Trigger" > "Trigger Now"
-5. Monitor pipeline execution (~30-60 min for full load)
-
-### 1.4 Verify Data in ADLS
-
+**Option B: Databricks CLI**
 ```bash
-# List extracted data
-az storage fs directory list \
-    --account-name wakecapadls \
-    --file-system raw \
-    --path wakecap \
-    --auth-mode login
+# Create workspace folders
+databricks workspace mkdirs /Workspace/WakeCapDW/notebooks
+
+# Upload notebooks
+databricks workspace import notebooks/sqlserver_incremental_load.py \
+    /Workspace/WakeCapDW/notebooks/sqlserver_incremental_load \
+    --format SOURCE --language PYTHON --overwrite
+
+databricks workspace import notebooks/wakecapdw_orchestrator.py \
+    /Workspace/WakeCapDW/notebooks/wakecapdw_orchestrator \
+    --format SOURCE --language PYTHON --overwrite
+
+# Create job
+databricks jobs create --json @jobs/wakecapdw_migration_job.json
 ```
 
-Expected structure:
-```
-wakecap/
-├── dimensions/
-│   ├── Organization/
-│   ├── Project/
-│   ├── Worker/
-│   └── ...
-├── assignments/
-│   ├── CrewAssignments/
-│   └── ...
-├── facts/
-│   ├── FactWorkersHistory/
-│   ├── FactWorkersShifts/
-│   └── ...
-└── other/
+### 1.3 Run Initial Full Load
+
+1. Open Databricks > Workflows > Jobs
+2. Find "WakeCapDW_Migration_Incremental"
+3. Click "Run Now" with parameters:
+   - For first run, tables will auto-detect as initial load
+4. Monitor job execution in the Runs tab
+
+### 1.4 Verify Data in Delta Tables
+
+```sql
+-- In Databricks SQL
+SELECT COUNT(*) FROM wakecap_prod.raw.wakecapdw_dbo_worker;
+SELECT COUNT(*) FROM wakecap_prod.raw.wakecapdw_dbo_project;
+SELECT COUNT(*) FROM wakecap_prod.raw.wakecapdw_dbo_factworkershistory;
+
+-- Check watermarks
+SHOW TBLPROPERTIES wakecap_prod.raw.wakecapdw_dbo_worker;
 ```
 
 ---
@@ -300,15 +297,29 @@ SET ROW FILTER security.organization_filter ON (OrganizationID);
 
 ## File Inventory
 
-| Category | File | Purpose |
+### Production Scripts
+
+| Category | Script | Purpose |
+|----------|--------|---------|
+| Setup | `setup_migration.py` | Initial setup with secrets and JDBC |
+| Setup | `deploy_timescaledb_bronze.py` | TimescaleDB bronze deployment |
+| Setup | `run_setup.py` | Quick setup runner |
+| Pipeline | `start_pipeline.py` | Start DLT pipelines |
+| Monitor | `monitor_pipeline.py` | Pipeline monitoring |
+| Monitor | `monitor_optimized_job.py` | Job monitoring |
+| Monitor | `check_watermarks.py` | Watermark verification |
+| Jobs | `run_bronze_all.py` | Run all bronze tables |
+| Jobs | `run_bronze_raw.py` | Run raw bronze tables |
+| Jobs | `deploy_optimized_pipeline.py` | Deploy optimized pipeline |
+| Jobs | `run_optimized_job.py` | Run optimized job |
+| Analysis | `analyze_sql.py` | SQL complexity analysis |
+| Generation | `generate_dlt_pipeline.py` | Generate DLT notebooks |
+| Deployment | `deploy_to_databricks.py` | Deploy to workspace |
+
+### Pipeline Files
+
+| Category | Path | Purpose |
 |----------|------|---------|
-| ADF | `adf/arm_template.json` | ARM deployment template |
-| ADF | `adf/deploy_adf.ps1` | PowerShell deployment script |
-| ADF | `adf/pipeline_config.json` | Table configuration |
-| Databricks | `databricks/setup_unity_catalog.py` | UC setup notebook |
-| Databricks | `databricks/cluster_config.json` | Cluster configuration |
-| Databricks | `databricks/dlt_pipeline_config.json` | DLT pipeline config |
-| Databricks | `databricks/deploy_to_databricks.py` | Deployment script |
 | DLT | `pipelines/dlt/bronze_all_tables.py` | 142 Bronze tables |
 | DLT | `pipelines/dlt/streaming_*.py` | CDC streaming tables |
 | DLT | `pipelines/dlt/silver_*.py` | Silver layer with DQ |
@@ -316,6 +327,29 @@ SET ROW FILTER security.organization_filter ON (OrganizationID);
 | Notebooks | `pipelines/notebooks/*.py` | Complex calculations |
 | UDFs | `pipelines/udfs/*.py` | Python UDFs |
 | Security | `pipelines/security/row_filters.sql` | Row-level security |
+| TimescaleDB | `pipelines/timescaledb/dlt_timescaledb_bronze.py` | Bronze DLT definitions |
+| TimescaleDB | `pipelines/timescaledb/notebooks/*.py` | Modular loaders |
+| TimescaleDB | `pipelines/timescaledb/src/*.py` | Loader modules |
+| TimescaleDB | `pipelines/timescaledb/config/*.yml` | Table registries |
+| Main | `pipelines/wakecap_migration_pipeline.py` | Main migration pipeline |
+
+### Databricks Config
+
+| Category | File | Purpose |
+|----------|------|---------|
+| Config | `databricks/config/wakecapdw_tables_complete.json` | Full table configuration |
+| Jobs | `databricks/jobs/*.json` | Job definitions |
+| Notebooks | `databricks/notebooks/*.py` | Deployment notebooks |
+| Scripts | `databricks/scripts/*.py` | Deployment scripts |
+| Pipeline | `databricks/dlt_pipeline_config.json` | DLT pipeline config |
+
+### ADF (Legacy)
+
+| Category | File | Purpose |
+|----------|------|---------|
+| ADF | `adf/arm_template.json` | ARM deployment template |
+| ADF | `adf/deploy_adf.ps1` | PowerShell deployment script |
+| ADF | `adf/pipeline_config.json` | Table configuration |
 
 ---
 
@@ -328,4 +362,4 @@ For issues with this migration:
 
 ---
 
-*Last updated: 2026-01-19*
+*Last updated: 2026-01-22*

@@ -248,3 +248,206 @@ def gold_customer_summary():
 | `Schema not found` | Target schema doesn't exist | Create schema first |
 | `No suitable driver` | JDBC driver not installed | Add mssql-jdbc JAR |
 | `Connection timeout` | Firewall blocking | Allow Databricks IPs |
+
+---
+
+## PostgreSQL/TimescaleDB to Databricks Bronze Layer
+
+### PostgreSQL Type Mappings
+
+| PostgreSQL Type | Databricks Type | Notes |
+|-----------------|-----------------|-------|
+| `TEXT` | `STRING` | |
+| `VARCHAR(n)` | `STRING` | Length not enforced |
+| `CHAR(n)` | `STRING` | |
+| `INTEGER` | `INT` | |
+| `BIGINT` | `BIGINT` | Same |
+| `SMALLINT` | `SMALLINT` | Same |
+| `SERIAL` | `INT` | Auto-increment, use IDENTITY |
+| `BIGSERIAL` | `BIGINT` | Auto-increment, use IDENTITY |
+| `BOOLEAN` | `BOOLEAN` | Same |
+| `TIMESTAMP` | `TIMESTAMP` | Same |
+| `TIMESTAMPTZ` | `TIMESTAMP` | Timezone converted to UTC |
+| `DATE` | `DATE` | Same |
+| `TIME` | `STRING` | No native TIME type |
+| `TIMETZ` | `STRING` | No native TIME type |
+| `NUMERIC(p,s)` | `DECIMAL(p,s)` | |
+| `DECIMAL(p,s)` | `DECIMAL(p,s)` | Same |
+| `REAL` | `FLOAT` | |
+| `DOUBLE PRECISION` | `DOUBLE` | |
+| `UUID` | `STRING` | Store as string |
+| `BYTEA` | `BINARY` | |
+| `JSON` | `STRING` | Parse with from_json() |
+| `JSONB` | `STRING` | Parse with from_json() |
+| `ARRAY` | `ARRAY` | Use array functions |
+| `INTERVAL` | `STRING` | Store as string |
+
+### PostgreSQL Function Mappings
+
+| PostgreSQL Function | Databricks Equivalent |
+|--------------------|----------------------|
+| `NOW()` | `CURRENT_TIMESTAMP()` |
+| `CURRENT_TIMESTAMP` | `CURRENT_TIMESTAMP()` |
+| `CURRENT_DATE` | `CURRENT_DATE()` |
+| `COALESCE(a, b)` | `COALESCE(a, b)` |
+| `NULLIF(a, b)` | `NULLIF(a, b)` |
+| `LENGTH(s)` | `LENGTH(s)` |
+| `POSITION(sub IN str)` | `LOCATE(sub, str)` |
+| `SUBSTRING(s FROM start FOR len)` | `SUBSTRING(s, start, len)` |
+| `TRIM(s)` | `TRIM(s)` |
+| `UPPER(s)` | `UPPER(s)` |
+| `LOWER(s)` | `LOWER(s)` |
+| `CONCAT(a, b)` | `CONCAT(a, b)` |
+| `TO_CHAR(date, format)` | `DATE_FORMAT(date, format)` |
+| `TO_DATE(str, format)` | `TO_DATE(str, format)` |
+| `TO_TIMESTAMP(str, format)` | `TO_TIMESTAMP(str, format)` |
+| `EXTRACT(part FROM date)` | `EXTRACT(part FROM date)` |
+| `DATE_TRUNC(part, date)` | `DATE_TRUNC(part, date)` |
+| `AGE(d1, d2)` | `DATEDIFF(d1, d2)` |
+| `gen_random_uuid()` | `UUID()` |
+| `ROW_NUMBER()` | `ROW_NUMBER()` |
+| `RANK()` | `RANK()` |
+| `DENSE_RANK()` | `DENSE_RANK()` |
+| `LAG()` | `LAG()` |
+| `LEAD()` | `LEAD()` |
+
+### Bronze Layer JDBC Pattern (PostgreSQL)
+
+```python
+@dlt.table(
+    name="bronze_tablename",
+    comment="Raw data from TimescaleDB",
+    table_properties={"quality": "bronze"}
+)
+def bronze_tablename():
+    host = dbutils.secrets.get("wakecap-timescale", "timescaledb-host")
+    port = dbutils.secrets.get("wakecap-timescale", "timescaledb-port")
+    database = dbutils.secrets.get("wakecap-timescale", "timescaledb-database")
+    user = dbutils.secrets.get("wakecap-timescale", "timescaledb-user")
+    password = dbutils.secrets.get("wakecap-timescale", "timescaledb-password")
+
+    jdbc_url = f"jdbc:postgresql://{host}:{port}/{database}?sslmode=require"
+
+    return (
+        spark.read.format("jdbc")
+        .option("url", jdbc_url)
+        .option("dbtable", "public.tablename")
+        .option("user", user)
+        .option("password", password)
+        .option("driver", "org.postgresql.Driver")
+        .option("fetchsize", "10000")
+        .load()
+        .withColumn("_loaded_at", current_timestamp())
+        .withColumn("_source_system", lit("timescaledb"))
+        .withColumn("_source_table", lit("tablename"))
+    )
+```
+
+### Generic Incremental Load Pattern with Watermarks
+
+```python
+def load_table_incremental(table_name: str, primary_key: str, watermark_col: str = None):
+    """Generic incremental loader using watermark tracking."""
+
+    # Get last watermark
+    last_watermark = spark.sql(f"""
+        SELECT last_watermark_timestamp
+        FROM wakecap_prod.migration._timescaledb_watermarks
+        WHERE source_table = '{table_name}' AND source_system = 'timescaledb'
+    """).first()
+
+    # Build query with watermark filter
+    if last_watermark and watermark_col:
+        query = f"SELECT * FROM public.{table_name} WHERE {watermark_col} > '{last_watermark[0]}'"
+    else:
+        query = f"SELECT * FROM public.{table_name}"
+
+    # Load data
+    df = (spark.read.format("jdbc")
+        .option("url", jdbc_url)
+        .option("query", query)
+        .option("user", user)
+        .option("password", password)
+        .option("driver", "org.postgresql.Driver")
+        .option("fetchsize", "10000")
+        .load()
+    )
+
+    # Upsert using MERGE
+    df.createOrReplaceTempView("source_data")
+
+    spark.sql(f"""
+        MERGE INTO wakecap_prod.source_timescaledb.public_{table_name} AS target
+        USING source_data AS source
+        ON target.{primary_key} = source.{primary_key}
+        WHEN MATCHED THEN UPDATE SET *
+        WHEN NOT MATCHED THEN INSERT *
+    """)
+
+    # Update watermark
+    update_watermark(table_name, df.count())
+```
+
+### High-Volume Table Handling
+
+For tables with millions of rows (OBS, DeviceLocation, etc.):
+
+```python
+# Use partitioned reading for large tables
+df = (spark.read.format("jdbc")
+    .option("url", jdbc_url)
+    .option("dbtable", "public.OBS")
+    .option("user", user)
+    .option("password", password)
+    .option("driver", "org.postgresql.Driver")
+    .option("fetchsize", "50000")  # Larger fetch size
+    .option("partitionColumn", "id")
+    .option("lowerBound", "1")
+    .option("upperBound", "100000000")
+    .option("numPartitions", "10")  # Parallel readers
+    .load()
+)
+```
+
+### TimescaleDB-Specific Patterns
+
+For TimescaleDB hypertables with time-series data:
+
+```python
+# Time-based incremental load for hypertables
+def load_hypertable(table_name: str, time_column: str = "time"):
+    last_time = get_last_watermark(table_name)
+
+    if last_time:
+        # Only load recent data
+        query = f"""
+            SELECT * FROM public.{table_name}
+            WHERE {time_column} > '{last_time}'
+            ORDER BY {time_column}
+        """
+    else:
+        # Initial load with time bounds
+        query = f"""
+            SELECT * FROM public.{table_name}
+            WHERE {time_column} >= NOW() - INTERVAL '30 days'
+            ORDER BY {time_column}
+        """
+
+    return (spark.read.format("jdbc")
+        .option("url", jdbc_url)
+        .option("query", query)
+        .option("fetchsize", "50000")
+        .load()
+    )
+```
+
+### PostgreSQL/TimescaleDB Error Patterns
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `Connection refused` | Firewall or wrong host | Check host/port, allow Databricks IPs |
+| `FATAL: password authentication failed` | Bad credentials | Verify secrets in scope |
+| `SSL connection required` | Missing sslmode | Add `?sslmode=require` to JDBC URL |
+| `Out of memory` | Large result set | Reduce fetchsize, use partitioning |
+| `Statement timeout` | Query too slow | Add `?statement_timeout=0` or increase |
+| `Table not found` | Wrong schema | Use `public.tablename` or set search_path |

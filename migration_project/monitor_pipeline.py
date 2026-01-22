@@ -123,7 +123,7 @@ def monitor_pipeline(pipeline_id: str, poll_interval: int = 30, max_wait: int = 
 
 
 def main():
-    pipeline_id = "f2c1c736-d12c-4274-b9da-a7f4119afa68"
+    pipeline_id = "bc59257f-73aa-42ed-9fc6-01a6c14dbb0a"
     
     # Monitor with 30 second poll, 10 minute max wait
     final_state, update_state = monitor_pipeline(

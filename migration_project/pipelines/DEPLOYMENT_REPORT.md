@@ -1,6 +1,6 @@
 # Databricks Deployment Report
 
-**Deployment Time:** 2026-01-18T10:27:24.906969
+**Deployment Time:** 2026-01-18T19:05:51.406370
 **Deployed By:** khaledauf@wakecap.com
 
 ## Databricks Connection
@@ -16,7 +16,7 @@
 
 ### DLT Pipeline
 - **Pipeline Name:** WakeCapDW_Migration_Pipeline
-- **Pipeline ID:** f2c1c736-d12c-4274-b9da-a7f4119afa68
+- **Pipeline ID:** bc59257f-73aa-42ed-9fc6-01a6c14dbb0a
 - **Development Mode:** True
 
 ## Pipeline Configuration
@@ -40,7 +40,7 @@
 
 3. **Start Pipeline (Development Mode):**
    ```bash
-   databricks pipelines start f2c1c736-d12c-4274-b9da-a7f4119afa68
+   databricks pipelines start bc59257f-73aa-42ed-9fc6-01a6c14dbb0a
    ```
 
 4. **Monitor Pipeline:**
@@ -49,5 +49,5 @@
    - Validate row counts
 
 ## Links
-- [DLT Pipeline](https://adb-3022397433351638.18.azuredatabricks.net/pipelines/f2c1c736-d12c-4274-b9da-a7f4119afa68)
+- [DLT Pipeline](https://adb-3022397433351638.18.azuredatabricks.net/pipelines/bc59257f-73aa-42ed-9fc6-01a6c14dbb0a)
 - [Notebook](https://adb-3022397433351638.18.azuredatabricks.net#workspace/Workspace/Shared/migrations/wakecap/wakecap_migration_pipeline)

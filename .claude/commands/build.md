@@ -18,6 +18,157 @@ Follow the `Workflow` to implement the `PATH_TO_PLAN` then `Report` the complete
 
 PATH_TO_PLAN: $ARGUMENTS
 
+## Claude-Driven SQL Object Conversion
+
+When converting stored procedures, views, and functions from SQL Server to Databricks, Claude acts as the primary developer. Follow these patterns:
+
+### Conversion Workflow
+
+1. **Read Source SQL** - Read the source SQL file from `migration_project/source_sql/`
+2. **Analyze Patterns** - Identify complexity patterns (CURSOR, TEMP_TABLE, DYNAMIC_SQL, SPATIAL)
+3. **Determine Target** - Choose output format based on patterns:
+   - Simple MERGE → DLT streaming table
+   - CTE-based transforms → DLT batch table
+   - CURSOR/DYNAMIC_SQL → Python notebook
+   - Functions → SQL UDF or Python UDF
+4. **Generate Code** - Write Databricks-compatible code
+5. **Write Output** - Save to appropriate location under `migration_project/pipelines/`
+6. **Update Status** - Mark as converted in `migration_project/MIGRATION_STATUS.md`
+
+### Output Directory Structure
+
+```
+migration_project/pipelines/
+├── dlt/
+│   ├── streaming_tables.py      # DeltaSync procedures → Auto Loader + APPLY CHANGES
+│   ├── batch_calculations.py    # Calculate procedures → DLT batch tables
+│   ├── assignment_tables.py     # Assignment procedures → DLT tables
+│   └── gold_views.py            # Transpiled views → Gold layer
+├── notebooks/
+│   ├── calc_fact_workers_shifts.py     # Complex CURSOR procedures
+│   ├── calc_worker_contacts.py
+│   └── merge_old_data.py
+├── udfs/
+│   ├── simple_udfs.sql          # String/time functions → SQL UDFs
+│   ├── spatial_udfs.py          # Geography functions → Python UDFs
+│   └── hierarchy_udfs.py        # Recursive CTE functions → Python UDFs
+└── security/
+    └── row_filters.sql          # Security predicates → Unity Catalog filters
+```
+
+### T-SQL to Spark/Databricks Conversion Patterns
+
+| T-SQL Pattern | Databricks Equivalent |
+|---------------|----------------------|
+| `CURSOR` loop | DataFrame with window functions |
+| `#TempTable` | `createOrReplaceTempView()` or CTE |
+| `MERGE INTO` | DLT `APPLY CHANGES INTO` or Spark `MERGE INTO` |
+| `DYNAMIC SQL` | Parameterized f-string queries |
+| `EXEC sp_name` | Function call or notebook `%run` |
+| `@@ROWCOUNT` | `df.count()` or action result |
+| `BEGIN TRAN` | Delta Lake ACID (automatic) |
+| `geography::Point` | H3 index or (lat, lon) tuple |
+| `STDistance()` | Haversine UDF or H3 `h3_distance` |
+
+### Stored Procedure Conversion Template
+
+```python
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # Converted from: {original_procedure_name}
+# MAGIC Original: {line_count} lines T-SQL
+# MAGIC Patterns: {patterns_found}
+# MAGIC Converted by: Claude Code
+
+# COMMAND ----------
+
+import dlt
+from pyspark.sql.functions import *
+from pyspark.sql.window import Window
+
+# COMMAND ----------
+
+# Configuration
+CATALOG = "wakecap_prod"
+SCHEMA = "migration"
+ADLS_PATH = "abfss://raw@<storage>.dfs.core.windows.net/wakecap"
+
+# COMMAND ----------
+
+# ORIGINAL T-SQL LOGIC (for reference):
+# {commented_original_sql}
+
+# COMMAND ----------
+
+@dlt.table(
+    name="{target_table_name}",
+    comment="Converted from {original_procedure_name}"
+)
+def {function_name}():
+    # Step 1: Load source data (replaces temp table creation)
+    source_df = spark.read.parquet(f"{ADLS_PATH}/{source_path}")
+
+    # Step 2: Apply transformations (replaces cursor logic)
+    window_spec = Window.partitionBy("key_column").orderBy("sort_column")
+
+    result_df = (
+        source_df
+        .withColumn("row_num", row_number().over(window_spec))
+        .withColumn("prev_value", lag("value_column").over(window_spec))
+        # ... additional transformations
+    )
+
+    return result_df
+```
+
+### Function Conversion Template (Python UDF)
+
+```python
+# migration_project/pipelines/udfs/{category}_udfs.py
+
+from pyspark.sql.functions import udf
+from pyspark.sql.types import StringType, DoubleType, IntegerType
+
+# Original: dbo.fnFunctionName
+# Parameters: @param1 NVARCHAR(MAX), @param2 INT
+# Returns: NVARCHAR(MAX)
+
+@udf(returnType=StringType())
+def fn_function_name(param1: str, param2: int) -> str:
+    """
+    Converted from: dbo.fnFunctionName
+    Original logic: {description}
+    """
+    # Implementation
+    result = ...
+    return result
+
+# Register for SQL use
+spark.udf.register("fn_function_name", fn_function_name)
+```
+
+### View Conversion Template (DLT Gold Layer)
+
+```python
+@dlt.table(
+    name="gold_{view_name}",
+    comment="Converted from dbo.{view_name}"
+)
+def gold_{view_name}():
+    """
+    Gold layer view - business logic from dbo.{view_name}
+    """
+    return spark.sql("""
+        -- Transpiled SQL from SQLGlot
+        SELECT ...
+        FROM LIVE.silver_table1 t1
+        JOIN LIVE.silver_table2 t2 ON t1.id = t2.id
+        WHERE ...
+    """)
+```
+
+---
+
 ## Migration-Specific Build Knowledge
 
 When building SQL Server to Databricks migrations, use these proven patterns:
@@ -299,6 +450,46 @@ while True:
     10. Create/update DLT pipeline
     11. Start pipeline and monitor
     12. Validate results
+
+### Claude-Driven Conversion Workflow
+
+When the plan involves converting stored procedures, views, or functions:
+
+1. **Read Source Files**
+   - Read each SQL file from `migration_project/source_sql/{stored_procedures|views|functions}/`
+   - Identify the complexity patterns (CURSOR, TEMP_TABLE, DYNAMIC_SQL, SPATIAL, MERGE)
+
+2. **Determine Target Format**
+   | Source Pattern | Target Format | Output Location |
+   |----------------|---------------|-----------------|
+   | spDeltaSync* | DLT streaming table | `pipelines/dlt/streaming_tables.py` |
+   | spCalculate* (simple) | DLT batch table | `pipelines/dlt/batch_calculations.py` |
+   | spCalculate* (CURSOR) | Python notebook | `pipelines/notebooks/` |
+   | Views | DLT Gold table | `pipelines/dlt/gold_views.py` |
+   | fn* (simple) | SQL UDF | `pipelines/udfs/simple_udfs.sql` |
+   | fn* (spatial) | Python UDF | `pipelines/udfs/spatial_udfs.py` |
+   | fn_*Predicate | Row filter | `pipelines/security/row_filters.sql` |
+
+3. **Generate Databricks Code**
+   - Use the conversion templates from this file
+   - Replace T-SQL patterns with Spark/Databricks equivalents
+   - Include original SQL as comments for reference
+   - Add proper DLT decorators and expectations
+
+4. **Write Output Files**
+   - Create directory structure if needed
+   - Write converted code to appropriate location
+   - Group related conversions in single files where logical
+
+5. **Update Migration Status**
+   - Mark each converted object in `migration_project/MIGRATION_STATUS.md`
+   - Note any manual review needed
+   - Track conversion statistics
+
+6. **Validate Conversions**
+   - Ensure generated code is syntactically valid Python
+   - Verify DLT table definitions are complete
+   - Check for missing dependencies or imports
 
 ## Report
 

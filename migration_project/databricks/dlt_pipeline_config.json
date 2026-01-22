@@ -1,0 +1,68 @@
+{
+  "name": "WakeCapDW_Migration_Pipeline",
+  "storage": "/mnt/dlt/wakecap",
+  "configuration": {
+    "pipeline.adls_storage_account": "wakecapadls",
+    "pipeline.adls_container": "raw",
+    "pipeline.catalog": "wakecap_prod",
+    "pipeline.schema": "migration"
+  },
+  "clusters": [
+    {
+      "label": "default",
+      "autoscale": {
+        "min_workers": 2,
+        "max_workers": 8,
+        "mode": "ENHANCED"
+      },
+      "spark_conf": {
+        "spark.databricks.delta.preview.enabled": "true",
+        "spark.databricks.delta.optimizeWrite.enabled": "true"
+      }
+    }
+  ],
+  "libraries": [
+    {
+      "notebook": {
+        "path": "/Workspace/WakeCapDW/dlt/bronze_all_tables"
+      }
+    },
+    {
+      "notebook": {
+        "path": "/Workspace/WakeCapDW/dlt/streaming_dimensions"
+      }
+    },
+    {
+      "notebook": {
+        "path": "/Workspace/WakeCapDW/dlt/streaming_facts"
+      }
+    },
+    {
+      "notebook": {
+        "path": "/Workspace/WakeCapDW/dlt/batch_calculations"
+      }
+    },
+    {
+      "notebook": {
+        "path": "/Workspace/WakeCapDW/dlt/silver_dimensions"
+      }
+    },
+    {
+      "notebook": {
+        "path": "/Workspace/WakeCapDW/dlt/silver_facts"
+      }
+    },
+    {
+      "notebook": {
+        "path": "/Workspace/WakeCapDW/dlt/gold_views"
+      }
+    }
+  ],
+  "target": "wakecap_prod.migration",
+  "catalog": "wakecap_prod",
+  "continuous": false,
+  "development": true,
+  "photon": true,
+  "edition": "ADVANCED",
+  "channel": "CURRENT"
+}

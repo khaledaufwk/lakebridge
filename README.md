@@ -219,6 +219,22 @@ snowflake:
   user: myuser
   password: mypassword
   warehouse: my_warehouse
+
+# TimescaleDB (PostgreSQL-based time-series database)
+# Used for incremental data loading into Raw Zone
+timescaledb:
+  host: myserver.timescale.cloud
+  port: 5432
+  database: mydatabase
+  user: myuser
+  password: mypassword
+  sslmode: require
+  # Incremental loading configuration
+  incremental:
+    enabled: true
+    watermark_column: created_at    # Column to track new records
+    watermark_type: timestamp       # timestamp or integer
+    initial_watermark: null         # Starting point (null = beginning)
 ```
 
 ## 📊 Delta Live Tables Templates

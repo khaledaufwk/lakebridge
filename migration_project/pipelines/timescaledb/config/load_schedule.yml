@@ -1,0 +1,105 @@
+# TimescaleDB Load Schedule Configuration
+# ================================================
+# Generic incremental load schedule for all tables
+# Updated: 2026-01-21
+#
+# Pattern: All tables loaded using PK-based upsert with watermark tracking
+# Source: TimescaleDB wakecap_app (81 tables)
+# ================================================
+
+version: "2.0"
+source_system: "timescaledb"
+target_catalog: "wakecap_prod"
+target_schema: "raw_timescaledb"
+
+# Databricks Workflow Configuration
+workflow:
+  name: "Bronze_TimescaleDB_Loader"
+  description: "Incremental loading from TimescaleDB to Bronze layer"
+  max_concurrent_runs: 1
+  timeout_seconds: 7200
+
+# Load Configuration (parameterized)
+load_config:
+  mode: "incremental"
+  merge_strategy: "upsert"
+  default_fetch_size: 10000
+  default_batch_size: 100000
+
+# Schedule Definitions
+# All tables use the same generic loader with different frequencies
+schedules:
+  # Frequent loading (every 5 minutes)
+  # High-volume transactional tables
+  frequent:
+    cron: "*/5 * * * *"
+    description: "High-frequency data"
+    notebook: "/Workspace/migration_project/pipelines/timescaledb/notebooks/bronze_loader"
+    parameters:
+      load_mode: "incremental"
+      fetch_size: "50000"
+    tables:
+      - OBS
+      - OBSCurrent
+      - DeviceLocation
+
+  # Standard loading (hourly)
+  # Most transactional and operational tables
+  hourly:
+    cron: "0 * * * *"
+    description: "Hourly incremental load"
+    notebook: "/Workspace/migration_project/pipelines/timescaledb/notebooks/bronze_loader"
+    parameters:
+      load_mode: "incremental"
+      fetch_size: "10000"
+    tables:
+      - ResourceAttendance
+      - ResourceHours
+      - ResourceTimesheet
+      - DeviceLocationSummary
+      - ZoneViolationLog
+      - EquipmentTelemetry
+      - SpaceHistory
+      - ZoneHistory
+      - AuditTrail
+      - SGSAttendanceLog
+      - CrewComposition
+      - CrewManager
+      - ResourceDevice
+      - ResourceZone
+      - WorkshiftResourceAssignment
+      - ZoneAuthorizedResource
+
+  # Daily loading (2 AM)
+  # Reference and master data tables
+  daily:
+    cron: "0 2 * * *"
+    description: "Daily incremental load"
+    notebook: "/Workspace/migration_project/pipelines/timescaledb/notebooks/bronze_loader"
+    parameters:
+      load_mode: "incremental"
+      tables: "ALL_REMAINING"
+
+# Cluster Configuration
+cluster_config:
+  frequent:
+    node_type_id: "Standard_DS3_v2"
+    num_workers: 2
+  hourly:
+    node_type_id: "Standard_DS4_v2"
+    num_workers: 4
+  daily:
+    node_type_id: "Standard_DS3_v2"
+    num_workers: 2
+
+# Retry Configuration
+retry_config:
+  max_retries: 3
+  retry_delay_seconds: 60
+
+# Monitoring
+monitoring:
+  latency_thresholds_minutes:
+    frequent: 15
+    hourly: 90
+    daily: 1500

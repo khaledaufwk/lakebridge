@@ -1,0 +1,76 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "ADF Pipeline Configuration for WakeCapDW Migration",
+    "source": "Azure SQL Server (WakeCapDW)",
+    "target": "ADLS Gen2 (Parquet format)",
+    "generatedDate": "2026-01-19"
+  },
+  "parameters": {
+    "factoryName": {
+      "type": "string",
+      "defaultValue": "wakecap-adf"
+    },
+    "sqlServerConnectionString": {
+      "type": "securestring"
+    },
+    "adlsAccountName": {
+      "type": "string",
+      "defaultValue": "wakecapadls"
+    },
+    "adlsContainerName": {
+      "type": "string",
+      "defaultValue": "raw"
+    }
+  },
+  "variables": {
+    "adlsBasePath": "[concat('abfss://', parameters('adlsContainerName'), '@', parameters('adlsAccountName'), '.dfs.core.windows.net/wakecap')]"
+  },
+  "tables": {
+    "dimensions": [
+      {"name": "Organization", "schema": "dbo", "incrementalColumn": null, "category": "dimensions"},
+      {"name": "Project", "schema": "dbo", "incrementalColumn": null, "category": "dimensions"},
+      {"name": "Worker", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "dimensions"},
+      {"name": "Crew", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "dimensions"},
+      {"name": "Trade", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "dimensions"},
+      {"name": "Company", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "dimensions"},
+      {"name": "Floor", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "dimensions"},
+      {"name": "Zone", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "dimensions"},
+      {"name": "Device", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "dimensions"},
+      {"name": "Workshift", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "dimensions"},
+      {"name": "WorkshiftDetails", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "dimensions"},
+      {"name": "Activity", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "dimensions"},
+      {"name": "LocationGroup", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "dimensions"},
+      {"name": "Department", "schema": "dbo", "incrementalColumn": null, "category": "dimensions"},
+      {"name": "Title", "schema": "dbo", "incrementalColumn": null, "category": "dimensions"},
+      {"name": "ObservationSource", "schema": "dbo", "incrementalColumn": null, "category": "dimensions"}
+    ],
+    "assignments": [
+      {"name": "CrewAssignments", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "assignments"},
+      {"name": "TradeAssignments", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "assignments"},
+      {"name": "WorkshiftAssignments", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "assignments"},
+      {"name": "DeviceAssignments", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "assignments"},
+      {"name": "ManagerAssignments", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "assignments"},
+      {"name": "ManagerAssignmentSnapshots", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "assignments"},
+      {"name": "LocationGroupAssignments", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "assignments"},
+      {"name": "WorkerLocationAssignments", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "assignments"}
+    ],
+    "facts": [
+      {"name": "FactWorkersHistory", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "partitionColumn": "LocalDate", "category": "facts"},
+      {"name": "FactWorkersShifts", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "partitionColumn": "ShiftLocalDate", "category": "facts"},
+      {"name": "FactWorkersShiftsCombined", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "partitionColumn": "ShiftLocalDate", "category": "facts"},
+      {"name": "FactReportedAttendance", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "partitionColumn": "ShiftLocalDate", "category": "facts"},
+      {"name": "FactObservations", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "partitionColumn": null, "category": "facts"},
+      {"name": "FactProgress", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "partitionColumn": "ProgressDate", "category": "facts"},
+      {"name": "FactWeatherObservations", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "partitionColumn": null, "category": "facts"},
+      {"name": "FactWorkersContacts", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "partitionColumn": "LocalDate", "category": "facts"},
+      {"name": "FactWorkersTasks", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "partitionColumn": null, "category": "facts"}
+    ],
+    "other": [
+      {"name": "ContactTracingRule", "schema": "dbo", "incrementalColumn": "WatermarkUTC", "category": "other"},
+      {"name": "SyncState", "schema": "stg", "incrementalColumn": null, "category": "other"},
+      {"name": "ImpactedAreaLog", "schema": "stg", "incrementalColumn": null, "category": "other"}
+    ]
+  }
+}

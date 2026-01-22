@@ -1,0 +1,379 @@
+# TimescaleDB Table Registry
+# ================================================
+# Generated: 2026-01-21 07:44:15
+# Source: wakecap_app database
+# Total tables: 81
+#
+# Pattern: Generic incremental load with PK-based upsert
+# All tables use watermark column for incremental extraction
+# ================================================
+
+registry_version: '2.0'
+source_system: timescaledb
+source_database: wakecap_app
+target_catalog: wakecap_prod
+target_schema: raw_timescaledb
+generated_date: '2026-01-21'
+description: TimescaleDB bronze layer - incremental load with watermark tracking
+defaults:
+  source_schema: public
+  watermark_type: timestamp
+  load_mode: incremental
+  merge_strategy: upsert
+  fetch_size: 10000
+  batch_size: 100000
+  enabled: true
+connection:
+  secret_scope: wakecap-timescale
+  driver: org.postgresql.Driver
+  ssl_mode: require
+metadata_columns:
+- name: _loaded_at
+  expression: current_timestamp()
+- name: _source_system
+  expression: '''timescaledb'''
+- name: _source_table
+  expression: source_table_name
+tables:
+- source_table: Activity
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: AssignedWorkshiftAttendanceScope
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: AttendanceReportConsalidatedDay
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: AuditTrail
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: AvlDevice
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Blueprint
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+  has_geometry: true
+  geometry_handling: ST_AsText
+- source_table: BulkUploadBatch
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: CalendarPeriod
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Certificate
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: CertificateType
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Co2Inspection
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Company
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: CompanyType
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Crew
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: CrewComposition
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: CrewManager
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: CrewProductivityStatus
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: CrewType
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: DataGroup
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: DelayReason
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Department
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: DeviceLocation
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+  has_geometry: true
+  geometry_handling: ST_AsText
+- source_table: DeviceLocationSummary
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+  has_geometry: true
+  geometry_handling: ST_AsText
+- source_table: Discipline
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Equipment
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: EquipmentCertificatesTypes
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: EquipmentOperators
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: EquipmentTelemetry
+  primary_key_columns:
+  - Id
+  watermark_column: CreatedAt
+- source_table: EquipmentType
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ExpiryDuration
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Inspection
+  primary_key_columns:
+  - Id
+  watermark_column: CreatedAt
+- source_table: LocationGroup
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: LocationGroupZone
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ManualLocationAssignment
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: MobileSyncRejectedActions
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Nationality
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: NovadeWorkPermit
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+  has_geometry: true
+  geometry_handling: ST_AsText
+- source_table: OBS
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: OBSCurrent
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Package
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: People
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: PeopleTitle
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: PermitActivity
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Plan
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: PlanProgress
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: PlanProgressDelayReason
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: PlanProgressResource
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ProgressDataGroup
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ProgressDelayReason
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: RegistrationType
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ResourceApprovedHour
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ResourceApprovedHoursSegment
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ResourceAttendance
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ResourceDevice
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ResourceHours
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ResourceTimesheet
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ResourceZone
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: SGSAttendanceLog
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: SGSAttendanceLogDebug
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: SGSIntegrationLog
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: SGSRosterWorkshiftLog
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Space
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+  has_geometry: true
+  geometry_handling: ST_AsText
+- source_table: SpaceHistory
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+  has_geometry: true
+  geometry_handling: ST_AsText
+- source_table: Trade
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Training
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: TrainingSession
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: TrainingSessionTrainee
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ViewFactWorkshiftsCache
+  primary_key_columns:
+  - Id
+  watermark_column: WatermarkUTC
+- source_table: WorkArea
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: WorkPermit
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: WorkPermitActivity
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Workshift
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: WorkshiftDay
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: WorkshiftResourceAssignment
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: WorkshiftSchedule
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: WorkshiftScheduleBreak
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: Zone
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+  has_geometry: true
+  geometry_handling: ST_AsText
+- source_table: ZoneAuthorizedResource
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ZoneCategory
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+- source_table: ZoneHistory
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+  has_geometry: true
+  geometry_handling: ST_AsText
+- source_table: ZoneViolationLog
+  primary_key_columns:
+  - Id
+  watermark_column: UpdatedAt
+  has_geometry: true
+  geometry_handling: ST_AsText

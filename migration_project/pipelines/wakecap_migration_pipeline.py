@@ -426,7 +426,7 @@ def silver_organization():
 )
 @dlt.expect_or_drop("valid_worker", "WorkerID IS NOT NULL")
 @dlt.expect_or_drop("valid_project", "ProjectID IS NOT NULL")
-@dlt.expect("valid_dates", "ShiftDate IS NOT NULL")
+@dlt.expect("valid_dates", "ShiftLocalDate IS NOT NULL")
 def silver_workers_shifts():
     """Silver table: Cleaned workers shifts data."""
     return (
@@ -452,11 +452,20 @@ def gold_worker_summary():
     workers = dlt.read("silver_worker")
     crews = dlt.read("silver_crew")
     devices = dlt.read("silver_device")
-    
-    # Get latest crew assignment
-    crew_assignments = dlt.read("bronze_dbo_CrewAssignments").filter(col("ValidTo").isNull())
-    device_assignments = dlt.read("bronze_dbo_DeviceAssignments").filter(col("ValidTo").isNull())
-    
+
+    # Get active crew assignments (CrewAssignments uses DeleteFlag, not ValidTo)
+    crew_assignments = (
+        dlt.read("bronze_dbo_CrewAssignments")
+        .filter((col("DeleteFlag").isNull()) | (col("DeleteFlag") == False))
+    )
+
+    # Get active device assignments (DeviceAssignments has ValidTo)
+    device_assignments = (
+        dlt.read("bronze_dbo_DeviceAssignments")
+        .filter(col("ValidTo").isNull())
+        .filter((col("DeleteFlag").isNull()) | (col("DeleteFlag") == False))
+    )
+
     return (
         workers
         .join(crew_assignments, ["WorkerID", "ProjectID"], "left")
@@ -480,23 +489,23 @@ def gold_worker_summary():
 
 @dlt.table(
     name="gold_daily_attendance",
-    comment="Daily attendance aggregates by project and crew"
+    comment="Daily attendance aggregates by project and shift date"
 )
 def gold_daily_attendance():
-    """Gold table: Daily attendance summary."""
+    """Gold table: Daily attendance summary based on actual shift activity."""
     shifts = dlt.read("silver_workers_shifts")
-    
+
     return (
         shifts
-        .groupBy("ProjectID", "ShiftDate")
+        .groupBy("ProjectID", "ShiftLocalDate")
         .agg(
             countDistinct("WorkerID").alias("total_workers"),
-            sum(when(col("IsPresent") == True, 1).otherwise(0)).alias("present_count"),
-            sum(when(col("IsAbsent") == True, 1).otherwise(0)).alias("absent_count"),
-            avg("WorkingHours").alias("avg_working_hours")
+            sum("ActiveTimeDuringShift").alias("total_active_time"),
+            avg("ActiveTimeDuringShift").alias("avg_active_time"),
+            sum("InactiveTimeDuringShift").alias("total_inactive_time"),
+            avg("Readings").alias("avg_readings"),
+            sum("DistanceTravelled").alias("total_distance")
         )
-        .withColumn("attendance_rate", 
-                    round(col("present_count") / col("total_workers") * 100, 2))
         .withColumn("_calculated_at", current_timestamp())
     )
 
@@ -549,7 +558,7 @@ def gold_project_summary():
 # MAGIC | Silver | project | ProjectID NOT NULL | Drop |
 # MAGIC | Silver | crew | CrewID NOT NULL | Drop |
 # MAGIC | Silver | device | DeviceID NOT NULL | Drop |
-# MAGIC | Silver | workers_shifts | Valid dates | Warn |
+# MAGIC | Silver | workers_shifts | ShiftLocalDate NOT NULL | Warn |
 # MAGIC 
 # MAGIC ### Monitoring
 # MAGIC 
