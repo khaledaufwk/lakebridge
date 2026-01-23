@@ -387,6 +387,210 @@ class DatabricksClient:
         """Get the URL to view a pipeline in Databricks UI."""
         return f"{self.host}/#joblist/pipelines/{pipeline_id}"
 
+    # -------------------------------------------------------------------------
+    # Cluster & Library Management
+    # -------------------------------------------------------------------------
+
+    def get_cluster_by_name(self, cluster_name: str) -> Optional[dict]:
+        """
+        Find a cluster by name.
+
+        Returns cluster info dict or None if not found.
+        """
+        clusters = self.client.clusters.list()
+        for cluster in clusters:
+            if cluster.cluster_name == cluster_name:
+                return {
+                    "cluster_id": cluster.cluster_id,
+                    "cluster_name": cluster.cluster_name,
+                    "state": cluster.state.value if cluster.state else "UNKNOWN",
+                    "spark_version": cluster.spark_version,
+                    "node_type_id": cluster.node_type_id,
+                }
+        return None
+
+    def get_cluster_libraries(self, cluster_id: str) -> List[dict]:
+        """
+        Get libraries installed on a cluster.
+
+        Returns list of library info dicts with status.
+        """
+        try:
+            statuses = self.client.libraries.cluster_status(cluster_id=cluster_id)
+            libraries = []
+            for lib_status in statuses.library_statuses or []:
+                lib_info = {"status": lib_status.status.value if lib_status.status else "UNKNOWN"}
+
+                # Parse library type
+                lib = lib_status.library
+                if lib.pypi:
+                    lib_info["type"] = "pypi"
+                    lib_info["package"] = lib.pypi.package
+                elif lib.whl:
+                    lib_info["type"] = "whl"
+                    lib_info["path"] = lib.whl
+                elif lib.jar:
+                    lib_info["type"] = "jar"
+                    lib_info["path"] = lib.jar
+                elif lib.maven:
+                    lib_info["type"] = "maven"
+                    lib_info["coordinates"] = lib.maven.coordinates
+
+                libraries.append(lib_info)
+            return libraries
+        except Exception as e:
+            return [{"error": str(e)}]
+
+    def install_cluster_library(
+        self,
+        cluster_id: str,
+        library_path: str,
+        library_type: str = "whl"
+    ) -> bool:
+        """
+        Install a library on a cluster.
+
+        Args:
+            cluster_id: Target cluster ID
+            library_path: Path to library (e.g., /Volumes/catalog/schema/libs/package.whl)
+            library_type: Type of library (whl, jar, pypi)
+
+        Returns:
+            True if installation was initiated successfully.
+        """
+        from databricks.sdk.service.compute import Library
+
+        try:
+            if library_type == "whl":
+                lib = Library(whl=library_path)
+            elif library_type == "jar":
+                lib = Library(jar=library_path)
+            elif library_type == "pypi":
+                from databricks.sdk.service.compute import PythonPyPiLibrary
+                lib = Library(pypi=PythonPyPiLibrary(package=library_path))
+            else:
+                raise ValueError(f"Unsupported library type: {library_type}")
+
+            self.client.libraries.install(cluster_id=cluster_id, libraries=[lib])
+            return True
+        except Exception as e:
+            print(f"Failed to install library: {e}")
+            return False
+
+    def check_required_libraries(
+        self,
+        cluster_id: str,
+        required_libraries: List[dict]
+    ) -> dict:
+        """
+        Check if required libraries are installed on a cluster.
+
+        Args:
+            cluster_id: Cluster to check
+            required_libraries: List of required libs, e.g.:
+                [
+                    {"type": "whl", "path": "/Volumes/.../package.whl", "name": "my_package"},
+                    {"type": "pypi", "package": "pyyaml", "name": "PyYAML"},
+                ]
+
+        Returns:
+            dict with:
+                - installed: list of installed library names
+                - missing: list of missing library configs
+                - all_installed: bool
+        """
+        installed_libs = self.get_cluster_libraries(cluster_id)
+
+        # Build set of installed library identifiers
+        installed_set = set()
+        for lib in installed_libs:
+            if lib.get("status") in ("INSTALLED", "PENDING"):
+                if lib.get("type") == "whl":
+                    installed_set.add(lib.get("path", "").lower())
+                elif lib.get("type") == "pypi":
+                    installed_set.add(lib.get("package", "").lower())
+
+        # Check required libraries
+        installed = []
+        missing = []
+
+        for req in required_libraries:
+            req_name = req.get("name", "unknown")
+            if req.get("type") == "whl":
+                if req.get("path", "").lower() in installed_set:
+                    installed.append(req_name)
+                else:
+                    missing.append(req)
+            elif req.get("type") == "pypi":
+                # PyYAML and other pre-installed packages should be checked differently
+                if req.get("package", "").lower() in installed_set:
+                    installed.append(req_name)
+                elif req.get("preinstalled", False):
+                    # Skip pre-installed packages (like PyYAML)
+                    installed.append(req_name)
+                else:
+                    missing.append(req)
+
+        return {
+            "installed": installed,
+            "missing": missing,
+            "all_installed": len(missing) == 0,
+        }
+
+    def ensure_cluster_libraries(
+        self,
+        cluster_id: str,
+        required_libraries: List[dict],
+        auto_install: bool = True
+    ) -> dict:
+        """
+        Ensure required libraries are installed on a cluster.
+
+        Args:
+            cluster_id: Target cluster
+            required_libraries: List of required libs (see check_required_libraries)
+            auto_install: If True, install missing libraries automatically
+
+        Returns:
+            dict with status and any actions taken
+        """
+        check_result = self.check_required_libraries(cluster_id, required_libraries)
+
+        if check_result["all_installed"]:
+            return {
+                "success": True,
+                "message": "All required libraries are installed",
+                "installed": check_result["installed"],
+            }
+
+        if not auto_install:
+            return {
+                "success": False,
+                "message": f"Missing libraries: {[m.get('name') for m in check_result['missing']]}",
+                "missing": check_result["missing"],
+            }
+
+        # Install missing libraries
+        installed_now = []
+        failed = []
+
+        for lib in check_result["missing"]:
+            lib_type = lib.get("type", "whl")
+            lib_path = lib.get("path") or lib.get("package")
+
+            if self.install_cluster_library(cluster_id, lib_path, lib_type):
+                installed_now.append(lib.get("name", lib_path))
+            else:
+                failed.append(lib.get("name", lib_path))
+
+        return {
+            "success": len(failed) == 0,
+            "message": f"Installed {len(installed_now)} libraries" if not failed else f"Failed to install: {failed}",
+            "installed_now": installed_now,
+            "failed": failed,
+            "already_installed": check_result["installed"],
+        }
+
     def deploy_migration_pipeline(
         self,
         notebook_content: str,

@@ -20,7 +20,13 @@ This plan outlines the work required to complete the migration of WakeCapDW to D
 
 ## Phase 1: Bronze Layer - TimescaleDB Incremental Loading
 
-### Status: IMPLEMENTED
+### Status: COMPLETE (Initial Load Done 2026-01-22)
+
+**Verification Results:**
+- **78 tables** successfully loaded to `wakecap_prod.raw`
+- All tables prefixed with `timescale_`
+- **22 tables** match SQL Server stg.wc2023_* tables
+- **56 tables** are TimescaleDB-only (new data sources)
 
 **Job Name:** `WakeCapDW_Bronze_TimescaleDB_Raw`
 **Loader:** `TimescaleDBLoaderV2` (pipelines/timescaledb/src/timescaledb_loader_v2.py)
@@ -143,19 +149,83 @@ query = f"""
 
 Tables with geometry columns (PostGIS) use `ST_AsText` conversion:
 
-| Table | Has Geometry | Handling |
-|-------|--------------|----------|
-| Blueprint | Yes | `ST_AsText("Geometry") AS "GeometryWKT"` |
-| DeviceLocation | Yes | `ST_AsText` conversion |
-| DeviceLocationSummary | Yes | `ST_AsText` conversion |
-| NovadeWorkPermit | Yes | `ST_AsText` conversion |
-| Space | Yes | `ST_AsText` conversion |
-| SpaceHistory | Yes | `ST_AsText` conversion |
-| Zone | Yes | `ST_AsText` conversion |
-| ZoneHistory | Yes | `ST_AsText` conversion |
-| ZoneViolationLog | Yes | `ST_AsText` conversion |
+| Table | Has Geometry | Geometry Columns | Handling |
+|-------|--------------|------------------|----------|
+| Blueprint | Yes | Geometry | `ST_AsText("Geometry") AS "GeometryWKT"` |
+| DeviceLocation | Yes | Point | `ST_AsText("Point")` |
+| DeviceLocationSummary | Yes | Point, ConfidenceArea | `ST_AsText` for both columns |
+| NovadeWorkPermit | Yes | Geometry | `ST_AsText` conversion |
+| Space | Yes | Geometry | `ST_AsText` conversion |
+| SpaceHistory | Yes | Geometry | `ST_AsText` conversion |
+| Zone | Yes | Geometry | `ST_AsText` conversion |
+| ZoneHistory | Yes | Geometry | `ST_AsText` conversion |
+| ZoneViolationLog | Yes | Geometry | `ST_AsText` conversion |
 
-### 1.5 Table Registry
+### 1.5 Large Table Optimization: DeviceLocation
+
+**Optimized:** 2026-01-22
+
+DeviceLocation and DeviceLocationSummary are TimescaleDB hypertables requiring special handling due to their size and structure.
+
+#### 1.5.1 DeviceLocation (82M rows, 52GB)
+
+| Attribute | Original Config | Optimized Config | Reason |
+|-----------|-----------------|------------------|--------|
+| **Primary Key** | `[Id]` | `[DeviceId, ProjectId, ActiveSequance, InactiveSequance, GeneratedAt]` | Matches actual composite PK in source |
+| **Watermark Column** | `UpdatedAt` | `GeneratedAt` | `UpdatedAt` is NULL for all 82M rows |
+| **Geometry Column** | `Geometry` | `Point` | Correct column name in source |
+| **Fetch Size** | 50,000 | 100,000 | Larger batches for hypertable |
+| **Batch Size** | 200,000 | 500,000 | Optimized for high-volume table |
+
+**Source Characteristics:**
+- TimescaleDB hypertable partitioned by `GeneratedAt` (14-day chunks)
+- ~1.7M rows per day (~50M rows/month)
+- Append-only pattern (no updates)
+- Index exists: `IX_DeviceLocation_GeneratedAt`
+
+#### 1.5.2 DeviceLocationSummary (848K rows, 3.8GB)
+
+| Attribute | Original Config | Optimized Config | Reason |
+|-----------|-----------------|------------------|--------|
+| **Primary Key** | `[Id]` | `[Day, DeviceId, ProjectId]` | Matches actual composite PK in source |
+| **Watermark Column** | `UpdatedAt` | `GeneratedAt` | Consistent with DeviceLocation |
+| **Geometry Columns** | `Geometry` | `Point, ConfidenceArea` | Both geometry columns |
+| **Batch Size** | (default) | 200,000 | Appropriate for table size |
+
+**Source Characteristics:**
+- TimescaleDB hypertable partitioned by `Day` (30-day chunks)
+- ~400K rows/month (daily aggregations)
+- Index exists: `IX_DeviceLocationSummary_GeneratedAt`
+
+#### 1.5.3 Databricks-Side Optimizations
+
+The following optimizations are applied to the target Delta tables:
+
+```sql
+-- DeviceLocation: Z-ORDER for query performance
+OPTIMIZE wakecap_prod.raw.timescale_devicelocation
+ZORDER BY (ProjectId, GeneratedAt);
+
+-- DeviceLocationSummary: Z-ORDER for query performance
+OPTIMIZE wakecap_prod.raw.timescale_devicelocationsummary
+ZORDER BY (ProjectId, Day);
+
+-- Table properties for large tables
+ALTER TABLE wakecap_prod.raw.timescale_devicelocation SET TBLPROPERTIES (
+    'delta.autoOptimize.optimizeWrite' = 'true',
+    'delta.autoOptimize.autoCompact' = 'true',
+    'delta.targetFileSize' = '128mb'
+);
+
+ALTER TABLE wakecap_prod.raw.timescale_devicelocationsummary SET TBLPROPERTIES (
+    'delta.autoOptimize.optimizeWrite' = 'true',
+    'delta.autoOptimize.autoCompact' = 'true'
+);
+```
+
+**Note:** TimescaleDB compression was evaluated but not implemented as it has adverse effects on source database performance.
+
+### 1.6 Table Registry
 
 **Registry File:** `pipelines/timescaledb/config/timescaledb_tables_v2.yml`
 
@@ -194,7 +264,7 @@ Tables with geometry columns (PostGIS) use `ST_AsText` conversion:
   category: facts
 ```
 
-### 1.6 Delta Write Strategy
+### 1.7 Delta Write Strategy
 
 #### MERGE Operation for Upserts
 
@@ -228,7 +298,7 @@ ALTER TABLE {target_table} SET TBLPROPERTIES (
 )
 ```
 
-### 1.7 Metadata Columns
+### 1.8 Metadata Columns
 
 Every bronze table includes:
 
@@ -241,7 +311,7 @@ Every bronze table includes:
 | `_pipeline_id` | Notebook path | Pipeline identifier |
 | `_pipeline_run_id` | Run ID | Unique run identifier |
 
-### 1.8 Notebook Parameters
+### 1.9 Notebook Parameters
 
 The bronze loader notebook accepts these parameters:
 
@@ -253,7 +323,7 @@ The bronze loader notebook accepts these parameters:
 | `fetch_size` | numeric | 50000 | JDBC fetch size |
 | `max_tables` | numeric | 0 (all) | Limit tables to load |
 
-### 1.9 Running the Bronze Job
+### 1.10 Running the Bronze Job
 
 #### Via Databricks UI
 
@@ -288,7 +358,7 @@ python run_bronze_all.py
 python monitor_pipeline.py --job-name "WakeCapDW_Bronze_TimescaleDB_Raw"
 ```
 
-### 1.10 Monitoring & Verification
+### 1.11 Monitoring & Verification
 
 #### Check Watermarks
 
@@ -334,7 +404,7 @@ WHERE last_load_status = 'failed'
 ORDER BY last_load_end_time DESC;
 ```
 
-### 1.11 Error Handling & Recovery
+### 1.12 Error Handling & Recovery
 
 #### Automatic Retry
 
@@ -351,6 +421,84 @@ loader.load_table(table_config, force_full_load=True)
 # Or via notebook parameter
 # Set load_mode = "full" and run specific category
 ```
+
+### 1.13 Additional TimescaleDB Databases
+
+#### 1.13.1 Observation Database (wakecap_observation)
+
+**Status:** READY FOR DEPLOYMENT (2026-01-22)
+
+The `wakecap_observation` database contains safety observation and incident tracking data.
+
+| Metric | Value |
+|--------|-------|
+| **Database** | wakecap_observation |
+| **Tables** | 6 |
+| **Total Rows** | ~8M |
+| **Table Prefix** | `observation_` |
+| **Secret Scope** | `wakecap-observation` |
+| **Notebook** | `bronze_loader_observation.py` |
+| **Registry** | `timescaledb_tables_observation.yml` |
+
+**Tables to Load:**
+
+| Table | Rows | PK | Watermark | Notes |
+|-------|------|-----|-----------|-------|
+| Observation | ~1.4M | Id | UpdatedAt | Has Location geometry |
+| TrackerSteps | ~5.6M | Id | UpdatedAt | Largest table |
+| ObservationTracker | ~595K | Id | UpdatedAt | Tracker metadata |
+| ObservationUpdate | ~405K | Id | UpdatedAt | Comments/updates |
+| ObservationUpdateAttachment | ~3.2K | Id | UpdatedAt | Attachments |
+| Settings | ~13 | Id | UpdatedAt | Project settings |
+
+**Deployment:**
+```bash
+# Deploy observation loader and configure secrets
+python deploy_observation_pipeline.py
+```
+
+#### 1.13.2 Weather Station Database (weather-station)
+
+**Status:** READY FOR DEPLOYMENT (2026-01-22)
+
+The `weather-station` database contains weather monitoring configuration and thresholds.
+
+| Metric | Value |
+|--------|-------|
+| **Database** | weather-station |
+| **Tables** | 7 |
+| **Total Rows** | ~115 |
+| **Table Prefix** | `weather_` |
+| **Secret Scope** | `wakecap-weather` |
+| **Notebook** | `bronze_loader_weather.py` |
+| **Registry** | `timescaledb_tables_weather.yml` |
+
+**Tables to Load:**
+
+| Table | Rows | PK | Watermark | Notes |
+|-------|------|-----|-----------|-------|
+| ProjectSettings | 44 | Id | UpdatedAt | Project-specific settings with JSONB |
+| ProjectThreshold | 41 | Id | UpdatedAt | Weather alert thresholds |
+| Indicator | 13 | Id | UpdatedAt | Weather indicators |
+| Graph | 11 | Id | UpdatedAt | Graph configurations |
+| HeatIndexStatus | 5 | Id | UpdatedAt | Heat index definitions |
+| Report | 1 | Id | UpdatedAt | Report configurations |
+| CalculatedStatistics | 0 | Id | UpdatedAt | Calculated stats (empty) |
+
+#### 1.13.3 Combined Deployment
+
+**Deploy both new databases:**
+```bash
+# Deploy observation + weather loaders and update job
+python deploy_new_databases.py
+```
+
+This creates a single job with 3 parallel tasks:
+1. `load_wakecap_app` - Main database (81 tables)
+2. `load_observation` - Observation database (6 tables)
+3. `load_weather` - Weather station (7 tables)
+
+**Total Tables:** 94 (81 + 6 + 7)
 
 ---
 
@@ -594,13 +742,15 @@ Compare key aggregations:
 
 ### 7.1 Pre-Production Checklist
 
-- [x] Bronze layer tables populated (81 tables)
-- [x] Incremental loading working
-- [x] Watermark tracking operational
+- [x] Bronze layer tables populated (78 tables loaded to wakecap_prod.raw)
+- [x] Incremental loading working (watermark-based JDBC extraction)
+- [x] Watermark tracking operational (_timescaledb_watermarks table)
+- [x] Geometry handling working (9 tables with ST_AsText conversion)
+- [x] **DeviceLocation optimization complete (correct PKs, GeneratedAt watermark, Z-ORDER)**
 - [ ] Silver layer transformations complete
 - [ ] Gold layer views working
 - [ ] Critical stored procedures converted
-- [ ] Row counts validated
+- [ ] Row counts validated against source
 - [ ] Business logic validated
 - [ ] Performance acceptable
 - [ ] Security (RLS) implemented
@@ -609,9 +759,15 @@ Compare key aggregations:
 
 | Job | Schedule | Description |
 |-----|----------|-------------|
-| WakeCapDW_Bronze_TimescaleDB_Raw | Daily 2:00 AM UTC | Incremental bronze load |
+| WakeCapDW_Bronze_TimescaleDB_Raw | Daily 2:00 AM UTC | Incremental bronze load (all tables) |
+| Bronze_DeviceLocation | On-demand / After main job | Dedicated loader for large DeviceLocation tables |
 | DLT Pipeline | Every 4 hours | Silver/Gold transformations |
 | Validation Job | Weekly | Data reconciliation |
+
+**Note:** DeviceLocation tables are included in the main job but can also be run separately using `bronze_loader_devicelocation` notebook for:
+- Initial full loads
+- Recovery from failures
+- Performance testing with different batch sizes
 
 ---
 
@@ -621,17 +777,25 @@ Compare key aggregations:
 
 | File | Purpose |
 |------|---------|
-| `pipelines/timescaledb/notebooks/bronze_loader_optimized.py` | Main loader notebook |
+| `pipelines/timescaledb/notebooks/bronze_loader_optimized.py` | Main loader notebook (wakecap_app) |
+| `pipelines/timescaledb/notebooks/bronze_loader_observation.py` | **Observation database loader (wakecap_observation)** |
+| `pipelines/timescaledb/notebooks/bronze_loader_weather.py` | **Weather station loader (weather-station)** |
 | `pipelines/timescaledb/notebooks/bronze_loader_dimensions.py` | Dimension-only loader |
 | `pipelines/timescaledb/notebooks/bronze_loader_facts.py` | Fact-only loader |
 | `pipelines/timescaledb/notebooks/bronze_loader_assignments.py` | Assignment-only loader |
+| `pipelines/timescaledb/notebooks/bronze_loader_devicelocation.py` | **Dedicated DeviceLocation loader (optimized)** |
+| `pipelines/timescaledb/notebooks/reset_devicelocation_watermarks.py` | **Reset watermarks for DeviceLocation tables** |
+| `pipelines/timescaledb/notebooks/optimize_devicelocation.py` | **Z-ORDER optimization for DeviceLocation** |
 | `pipelines/timescaledb/src/timescaledb_loader_v2.py` | Loader module |
-| `pipelines/timescaledb/config/timescaledb_tables_v2.yml` | Table registry (81 tables) |
+| `pipelines/timescaledb/config/timescaledb_tables_v2.yml` | Table registry - wakecap_app (81 tables) |
+| `pipelines/timescaledb/config/timescaledb_tables_observation.yml` | **Table registry - wakecap_observation (6 tables)** |
+| `pipelines/timescaledb/config/timescaledb_tables_weather.yml` | **Table registry - weather-station (7 tables)** |
 
 ### Production Scripts
 
 | Script | Purpose |
 |--------|---------|
+| `deploy_new_databases.py` | **Deploy observation + weather loaders and update job** |
 | `run_bronze_all.py` | Run all bronze tables |
 | `run_bronze_raw.py` | Run raw bronze |
 | `monitor_pipeline.py` | Monitor pipeline execution |
@@ -650,5 +814,19 @@ Compare key aggregations:
 | Performance degradation | Low | High | Performance testing before cutover |
 
 ---
+
+---
+
+## Update Log
+
+| Date | Update |
+|------|--------|
+| 2026-01-22 | **Added wakecap_observation database** - 6 tables (~8M rows), observation_* prefix |
+| 2026-01-22 | **Added weather-station database** - 7 tables (~115 rows), weather_* prefix |
+| 2026-01-22 | **Created unified deployment script** - deploy_new_databases.py for both new databases |
+| 2026-01-22 | DeviceLocation optimization: Fixed PK, watermark (GeneratedAt), geometry columns; added Databricks Z-ORDER |
+| 2026-01-22 | Bronze layer initial load COMPLETE - 78 tables loaded from TimescaleDB |
+| 2026-01-21 | TimescaleDB table registry v2.1 created |
+| 2026-01-18 | Initial plan created |
 
 *This plan should be reviewed and updated as the migration progresses.*

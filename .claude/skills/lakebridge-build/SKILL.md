@@ -262,17 +262,93 @@ def silver_worker():
 - Implement the entire plan top to bottom before stopping.
 - For migrations, follow this order:
   1. Verify credentials configuration
-  2. Test connectivity to both source and target
-  3. Extract SQL objects from source
-  4. Analyze SQL complexity
-  5. Run transpilation
-  6. Generate DLT pipeline
-  7. Create schema in Unity Catalog (if needed)
-  8. Configure secrets in Databricks
-  9. Upload notebook to workspace
-  10. Create/update DLT pipeline
-  11. Start pipeline and monitor
-  12. Validate results
+  2. **Validate compute cluster has required libraries** (see below)
+  3. Test connectivity to both source and target
+  4. Extract SQL objects from source
+  5. Analyze SQL complexity
+  6. Run transpilation
+  7. Generate DLT pipeline
+  8. Create schema in Unity Catalog (if needed)
+  9. Configure secrets in Databricks
+  10. Upload notebook to workspace
+  11. Create/update DLT pipeline
+  12. Start pipeline and monitor
+  13. Validate results
+
+## Compute Validation (CRITICAL)
+
+Before deploying any notebooks, validate that the target cluster has required libraries installed.
+
+### Required Libraries
+
+The following must be installed on the compute cluster:
+
+| Library | Type | Path/Package | Notes |
+|---------|------|--------------|-------|
+| timescaledb_loader | whl | `/Volumes/wakecap_prod/migration/libs/timescaledb_loader-2.0.0-py3-none-any.whl` | Custom loader module |
+| PyYAML | pypi | pyyaml | Pre-installed on Databricks runtime |
+
+### Validation Steps
+
+1. **Load credentials** with compute config from `credentials_template.yml`
+2. **Find cluster** by name (e.g., "Migrate Compute - Khaled Auf")
+3. **Check installed libraries** on the cluster
+4. **Install missing libraries** if any are not installed
+5. **Verify installation** before proceeding
+
+### Validation Code Pattern
+
+```python
+from scripts.credentials import CredentialsManager
+from scripts.databricks_client import DatabricksClient
+
+# Load credentials
+creds = CredentialsManager(Path("migration_project/credentials_template.yml")).load()
+
+# Initialize Databricks client
+client = DatabricksClient(
+    host=creds.databricks.host,
+    token=creds.databricks.token
+)
+
+# Get compute config
+if creds.compute:
+    # Find cluster by name
+    cluster = client.get_cluster_by_name(creds.compute.cluster_name)
+    if not cluster:
+        raise RuntimeError(f"Cluster '{creds.compute.cluster_name}' not found")
+
+    cluster_id = cluster["cluster_id"]
+    print(f"Found cluster: {cluster['cluster_name']} ({cluster_id})")
+    print(f"State: {cluster['state']}")
+
+    # Check and install required libraries
+    required_libs = creds.compute.get_required_libraries()
+    result = client.ensure_cluster_libraries(
+        cluster_id=cluster_id,
+        required_libraries=required_libs,
+        auto_install=True  # Automatically install missing libraries
+    )
+
+    if result["success"]:
+        print(f"✓ All required libraries installed: {result.get('installed', [])}")
+        if result.get("installed_now"):
+            print(f"  Newly installed: {result['installed_now']}")
+    else:
+        raise RuntimeError(f"Failed to ensure libraries: {result['message']}")
+else:
+    print("Warning: No compute config specified, skipping library validation")
+```
+
+### Manual Library Installation (if needed)
+
+If auto-install fails, install libraries manually via Databricks UI:
+
+1. Go to **Compute** > Select cluster > **Libraries** tab
+2. Click **Install new**
+3. Select **Volumes** and enter: `/Volumes/wakecap_prod/migration/libs/timescaledb_loader-2.0.0-py3-none-any.whl`
+4. Click **Install**
+5. Wait for status to show "Installed"
 
 ## Report
 

@@ -1,8 +1,9 @@
 # WakeCapDW Migration Status Report
 
 **Generated:** 2026-01-19
-**Source:** WakeCapDW_20251215 (Azure SQL Server)
-**Target:** Databricks Unity Catalog (wakecap_prod.migration)
+**Last Updated:** 2026-01-22
+**Source:** TimescaleDB (wakecap_app) + WakeCapDW_20251215 (Azure SQL Server)
+**Target:** Databricks Unity Catalog (wakecap_prod)
 
 ---
 
@@ -17,6 +18,7 @@
 | Stored Procedures | 70/70 (100%) |
 | Functions | 23/23 (100%) |
 | Pipeline Status | Deployed (Development Mode) |
+| **Bronze Layer (TimescaleDB)** | **78 tables LOADED** |
 
 ---
 
@@ -30,13 +32,135 @@
 | 4. DLT Generation | COMPLETE | 100% |
 | 5. Deployment | COMPLETE | 100% |
 | 6. ADF Extraction to ADLS | READY | 100% (artifacts) |
-| 7. Data Ingestion (Bronze) | CONVERTED | 100% |
+| 7. Data Ingestion (Bronze) | **COMPLETE** | **100%** |
 | 8. Data Transformation (Silver) | CONVERTED | 100% |
 | 9. Business Layer (Gold) | CONVERTED | 100% |
 | 10. Stored Procedure Conversion | COMPLETE | 100% |
 | 11. Function Conversion | COMPLETE | 100% |
 | 12. Reconciliation | READY | 100% |
 | 13. Production Deployment | PENDING | 0% |
+
+---
+
+## Bronze Layer Status (2026-01-22) - INITIAL LOAD COMPLETE
+
+### TimescaleDB to Databricks Migration
+
+The initial load of the Bronze layer from TimescaleDB to Databricks Unity Catalog is **COMPLETE**.
+
+| Metric | Value |
+|--------|-------|
+| **Source Database** | TimescaleDB (wakecap_app) |
+| **Target Catalog** | wakecap_prod |
+| **Target Schema** | raw |
+| **Total Tables Loaded** | 78 |
+| **Table Prefix** | timescale_* |
+| **Load Method** | JDBC with watermark-based incremental |
+| **Job Name** | WakeCapDW_Bronze_TimescaleDB_Raw |
+
+### Table Categories Loaded
+
+| Category | Count | Description |
+|----------|-------|-------------|
+| Dimensions | 35 | Reference/lookup tables (Company, People, Zone, etc.) |
+| Assignments | 18 | Association/bridge tables |
+| Facts | 20 | Transactional data (ResourceZone, Telemetry, etc.) |
+| History | 3 | Audit/history tables (SpaceHistory, ZoneHistory) |
+| With Geometry | 9 | Tables with PostGIS columns (converted via ST_AsText) |
+
+### Comparison: TimescaleDB Bronze vs SQL Server Staging
+
+| Metric | Count |
+|--------|-------|
+| **Databricks timescale_* tables** | 78 |
+| **SQL Server stg.wc2023_* tables** | 48 |
+| **Tables in BOTH systems** | 22 |
+| **TimescaleDB-only tables** | 56 |
+| **SQL Server-only tables** | 26 |
+
+#### Tables Successfully Migrated (in both systems)
+
+| Databricks Table | SQL Server Table |
+|------------------|------------------|
+| timescale_company | stg.wc2023_Company |
+| timescale_crew | stg.wc2023_Crew |
+| timescale_crewcomposition | stg.wc2023_CrewComposition |
+| timescale_datagroup | stg.wc2023_DataGroup |
+| timescale_delayreason | stg.wc2023_DelayReason |
+| timescale_department | stg.wc2023_Department |
+| timescale_locationgroup | stg.wc2023_LocationGroup |
+| timescale_locationgroupzone | stg.wc2023_LocationGroupZone |
+| timescale_manuallocationassignment | stg.wc2023_ManualLocationAssignment |
+| timescale_obs | stg.wc2023_OBS |
+| timescale_people | stg.wc2023_People |
+| timescale_peopletitle | stg.wc2023_PeopleTitle |
+| timescale_resourcedevice | stg.wc2023_ResourceDevice |
+| timescale_resourcehours | stg.wc2023_ResourceHours |
+| timescale_resourcetimesheet | stg.wc2023_ResourceTimesheet |
+| timescale_resourcezone | stg.wc2023_ResourceZone |
+| timescale_space | stg.wc2023_Space |
+| timescale_trade | stg.wc2023_Trade |
+| timescale_workshift | stg.wc2023_Workshift |
+| timescale_workshiftresourceassignment | stg.wc2023_WorkshiftResourceAssignment |
+| timescale_workshiftschedule | stg.wc2023_WorkshiftSchedule |
+| timescale_zone | stg.wc2023_Zone |
+
+#### TimescaleDB-Only Tables (56 tables - new data sources)
+
+These tables are loaded from TimescaleDB but were not in the original SQL Server staging:
+
+- Activity, AssignedWorkshiftAttendanceScope, AttendanceReportConsalidatedDay
+- AvlDevice, Blueprint, CalendarPeriod, Certificate, CertificateType
+- Co2Inspection, CompanyType, CrewManager, CrewProductivityStatus, CrewType
+- DeviceLocation, DeviceLocationSummary, Discipline, Equipment
+- EquipmentCertificatesTypes, EquipmentOperators, EquipmentTelemetry, EquipmentType
+- ExpiryDuration, Inspection, Nationality, NovadeWorkPermit
+- OBSCurrent, Package, PermitActivity, Plan, PlanProgress
+- PlanProgressDelayReason, PlanProgressResource, ProgressDataGroup, ProgressDelayReason
+- RegistrationType, ResourceApprovedHour, ResourceApprovedHoursSegment, ResourceAttendance
+- SGSAttendanceLog, SGSIntegrationLog, SGSRosterWorkshiftLog, SpaceHistory
+- Training, TrainingSession, TrainingSessionTrainee, ViewFactWorkshiftsCache
+- WorkArea, WorkPermit, WorkPermitActivity, WorkshiftDay, WorkshiftScheduleBreak
+- ZoneAuthorizedResource, ZoneCategory, ZoneHistory, ZoneViolationLog
+
+#### SQL Server-Only Tables (not yet in Bronze)
+
+These tables exist in SQL Server stg schema but are NOT in the Databricks Bronze layer:
+
+| Table | Notes |
+|-------|-------|
+| stg.wc2023_asset_location | Asset tracking data |
+| stg.wc2023_asset_location_stalled | Stale asset data |
+| stg.wc2023_CrewComposition_full | Full refresh variant |
+| stg.wc2023_CrewManagerAssignments | Manager assignments |
+| stg.wc2023_CrewManagerAssignments_full | Full refresh variant |
+| stg.wc2023_ManualLocationAssignment_full | Full refresh variant |
+| stg.wc2023_node | Graph/hierarchy data |
+| stg.wc2023_OBS_full | Full refresh variant |
+| stg.wc2023_observation_* (7 tables) | Observation dimension tables |
+| stg.wc2023_organization | Organization hierarchy |
+| stg.wc2023_PermissionsQuery | Permission configuration |
+| stg.wc2023_Project | Project dimension |
+| stg.wc2023_ResourceDevice_full | Full refresh variant |
+| stg.wc2023_ResourceHours_full | Full refresh variant |
+| stg.wc2023_ResourceTimesheet_full | Full refresh variant |
+| stg.wc2023_ResourceZone_full | Full refresh variant |
+| stg.wc2023_weather_station_sensor | Weather sensor data |
+| stg.wc2023_WorkshiftResourceAssignment_full | Full refresh variant |
+
+**Note:** Many `_full` suffix tables are full-refresh staging variants and may not need separate migration. The `observation_*` tables may need to be sourced from TimescaleDB or SQL Server directly.
+
+### Excluded Tables (5)
+
+These tables were intentionally excluded due to complex JSON/binary data:
+
+| Table | Reason |
+|-------|--------|
+| AuditTrail | Complex JSON in Changes column - audit/logging table |
+| MobileSyncRejectedActions | Complex JSON payload - sync debugging table |
+| SGSAttendanceLogDebug | Debug/logging with complex JSON |
+| SGSIntegrationLog | Integration logging with complex payloads |
+| BulkUploadBatch | Binary file data and complex JSON |
 
 ---
 
@@ -303,13 +427,20 @@ migration_project/pipelines/
 6. **Unity Catalog Configuration** - Setup notebook created
 7. **Databricks Deployment** - DLT pipeline config and deployment script created
 
+### Resolved (2026-01-22 - Bronze Layer)
+
+8. **TimescaleDB Bronze Layer** - Initial load complete (78 tables)
+9. **Watermark Tracking** - Operational for incremental loads
+10. **Geometry Handling** - ST_AsText conversion working for 9 tables
+
 ### Pending (Execution Required)
 
-1. **Execute ADF Deployment** - Run `adf/deploy_adf.ps1` to deploy pipelines
-2. **Run ADF Full Extract** - Trigger WakeCapDW_FullExtract pipeline
-3. **Execute UC Setup** - Run `setup_unity_catalog.py` notebook
-4. **Deploy DLT Pipeline** - Run `deploy_to_databricks.py` script
-5. **Run Validation** - Execute `validation_reconciliation.py` after data load
+1. ~~**Execute ADF Deployment**~~ - Not needed for TimescaleDB source
+2. ~~**Run ADF Full Extract**~~ - Replaced by TimescaleDB JDBC loading
+3. **Deploy Silver Layer** - Run DLT pipeline for Silver transformations
+4. **Deploy Gold Layer** - Run DLT pipeline for Gold views
+5. **Run Validation** - Execute `validation_reconciliation.py` for data reconciliation
+6. **Load SQL Server-only tables** - Consider loading observation_*, organization, Project tables
 
 ---
 
@@ -325,7 +456,10 @@ migration_project/pipelines/
 | Databricks | `databricks/dlt_pipeline_config.json` | READY |
 | Databricks | `databricks/deploy_to_databricks.py` | READY |
 | Guide | `DEPLOYMENT_GUIDE.md` | READY |
+| **TimescaleDB** | `pipelines/timescaledb/notebooks/bronze_loader_*.py` | **DEPLOYED** |
+| **TimescaleDB** | `pipelines/timescaledb/config/timescaledb_tables_v2.yml` | **DEPLOYED** |
+| **TimescaleDB** | `pipelines/timescaledb/src/timescaledb_loader_v2.py` | **DEPLOYED** |
 
 ---
 
-*Status updated: 2026-01-19 - All SQL objects converted. Deployment artifacts created. Ready for execution.*
+*Status updated: 2026-01-22 - Bronze layer initial load from TimescaleDB COMPLETE. 78 tables loaded to wakecap_prod.raw. Ready for Silver/Gold layer deployment.*

@@ -1,0 +1,104 @@
+# TimescaleDB Table Registry - Observation Database
+# =================================================
+# Source: wakecap_observation (TimescaleDB)
+# Target: wakecap_prod.raw (Delta Lake)
+# Table Prefix: observation_
+# Generated: 2026-01-22
+#
+# Tables discovered from wakecap_observation database:
+#   - Observation (1.38M rows) - main observation/incident data with Location geometry
+#   - TrackerSteps (5.59M rows) - tracker step logs (largest table)
+#   - ObservationTracker (595K rows) - tracker metadata
+#   - ObservationUpdate (405K rows) - observation updates/comments
+#   - ObservationUpdateAttachment (3.2K rows) - attachments
+#   - Settings (13 rows) - project settings
+
+registry_version: "2.0"
+source_system: timescaledb
+source_database: wakecap_observation
+table_prefix: observation_
+target_catalog: wakecap_prod
+target_schema: raw
+
+defaults:
+  source_schema: public
+  watermark_type: timestamp
+  is_full_load: false
+  fetch_size: 50000
+  batch_size: 100000
+  enabled: true
+
+tables:
+  # ===================
+  # FACTS (Core Data)
+  # ===================
+
+  # Observation - Main table with Location geometry and DeletedAt column
+  # Uses custom_query to convert geometry with ST_AsText (same pattern as Blueprint, Space, Zone)
+  - source_table: Observation
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'), COALESCE(\"DeletedAt\", '1900-01-01'))"
+    category: facts
+    has_geometry: true
+    geometry_columns: [Location]
+    custom_query: |
+      SELECT *, ST_AsText("Location") as "LocationWKT"
+      FROM "public"."Observation"
+      WHERE GREATEST(COALESCE("CreatedAt", '1900-01-01'), COALESCE("UpdatedAt", '1900-01-01'), COALESCE("DeletedAt", '1900-01-01')) > '{watermark}'
+    fetch_size: 100000
+    batch_size: 200000
+    comment: "Main observation/incident table with Location geometry. ~1.4M rows"
+
+  - source_table: TrackerSteps
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+    fetch_size: 100000
+    batch_size: 500000
+    comment: "Tracker step logs - largest table ~5.6M rows"
+
+  - source_table: ObservationTracker
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+    fetch_size: 100000
+    batch_size: 200000
+    comment: "Observation tracker metadata ~595K rows"
+
+  - source_table: ObservationUpdate
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+    comment: "Observation updates/comments ~405K rows"
+
+  - source_table: ObservationUpdateAttachment
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+    comment: "Observation attachments ~3.2K rows"
+
+  # ===================
+  # DIMENSIONS (Config)
+  # ===================
+
+  - source_table: Settings
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true  # Small reference table
+    comment: "Project settings - small table ~13 rows"
+
+excluded_tables:
+  - source_table: __EFMigrationsHistory
+    reason: "EF Core migrations history - not needed"
+  - source_table: spatial_ref_sys
+    reason: "PostGIS system table"
+  - source_table: seq_name
+    reason: "Sequence table - not data"
+  - source_table: ObservationCategory
+    reason: "Table exists but appears to be empty"

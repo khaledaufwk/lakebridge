@@ -13,18 +13,14 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install pyyaml --quiet
+# MAGIC %pip install /Volumes/wakecap_prod/migration/libs/timescaledb_loader-2.0.0-py3-none-any.whl --quiet
 
 # COMMAND ----------
 
-import sys
 import os
 from datetime import datetime
 
-# Add source directory to path
-sys.path.append("/Workspace/migration_project/pipelines/timescaledb/src")
-
-from timescaledb_loader_v2 import (
+from timescaledb_loader import (
     TimescaleDBLoaderV2,
     TimescaleDBCredentials,
     LoadStatus,
@@ -180,28 +176,46 @@ print(f"Completed loading {len(results)} tables")
 
 # COMMAND ----------
 
-# Create detailed summary
+# Create detailed summary with explicit schema to handle empty results or all-null columns
 from pyspark.sql import Row
+from pyspark.sql.types import StructType, StructField, StringType, LongType, DoubleType, IntegerType
 
-summary_data = [
-    Row(
-        table=r.table_config.source_table,
-        category=r.table_config.category,
-        status=r.status.value,
-        rows_loaded=r.rows_loaded,
-        duration_seconds=round(r.duration_seconds, 2) if r.duration_seconds else 0.0,
-        retries=r.retry_count,
-        watermark_expr="GREATEST" if r.table_config.watermark_expression else "Single",
-        has_geometry="Yes" if r.table_config.has_geometry else "No",
-        previous_wm=str(r.previous_watermark)[:20] if r.previous_watermark else "N/A",
-        new_wm=str(r.new_watermark)[:20] if r.new_watermark else "N/A",
-        error=r.error_message[:80] if r.error_message else None
-    )
-    for r in results
-]
+# Define explicit schema to avoid [CANNOT_DETERMINE_TYPE] error
+summary_schema = StructType([
+    StructField("table", StringType(), True),
+    StructField("category", StringType(), True),
+    StructField("status", StringType(), True),
+    StructField("rows_loaded", LongType(), True),
+    StructField("duration_seconds", DoubleType(), True),
+    StructField("retries", IntegerType(), True),
+    StructField("watermark_expr", StringType(), True),
+    StructField("has_geometry", StringType(), True),
+    StructField("previous_wm", StringType(), True),
+    StructField("new_wm", StringType(), True),
+    StructField("error", StringType(), True)
+])
 
-summary_df = spark.createDataFrame(summary_data)
-display(summary_df.orderBy("category", "table"))
+if results:
+    summary_data = [
+        Row(
+            table=r.table_config.source_table,
+            category=r.table_config.category,
+            status=r.status.value,
+            rows_loaded=r.rows_loaded,
+            duration_seconds=round(r.duration_seconds, 2) if r.duration_seconds else 0.0,
+            retries=r.retry_count,
+            watermark_expr="GREATEST" if r.table_config.watermark_expression else "Single",
+            has_geometry="Yes" if r.table_config.has_geometry else "No",
+            previous_wm=str(r.previous_watermark)[:20] if r.previous_watermark else "N/A",
+            new_wm=str(r.new_watermark)[:20] if r.new_watermark else "N/A",
+            error=r.error_message[:80] if r.error_message else None
+        )
+        for r in results
+    ]
+    summary_df = spark.createDataFrame(summary_data, schema=summary_schema)
+    display(summary_df.orderBy("category", "table"))
+else:
+    print("No tables were loaded - results list is empty")
 
 # COMMAND ----------
 

@@ -1,0 +1,8 @@
+setup.py
+timescaledb_loader/__init__.py
+timescaledb_loader/loader.py
+timescaledb_loader.egg-info/PKG-INFO
+timescaledb_loader.egg-info/SOURCES.txt
+timescaledb_loader.egg-info/dependency_links.txt
+timescaledb_loader.egg-info/requires.txt
+timescaledb_loader.egg-info/top_level.txt

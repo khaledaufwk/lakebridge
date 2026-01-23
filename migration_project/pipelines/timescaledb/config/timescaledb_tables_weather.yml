@@ -1,0 +1,93 @@
+# TimescaleDB Table Registry - Weather Station Database
+# =====================================================
+# Source: weather-station (TimescaleDB)
+# Target: wakecap_prod.raw (Delta Lake)
+# Table Prefix: weather_
+# Generated: 2026-01-22
+#
+# Tables discovered from weather-station database:
+#   - ProjectSettings (44 rows) - project weather settings
+#   - ProjectThreshold (41 rows) - weather alert thresholds
+#   - Indicator (13 rows) - weather indicators
+#   - Graph (11 rows) - graph configurations
+#   - HeatIndexStatus (5 rows) - heat index definitions
+#   - Report (1 row) - report configurations
+#   - CalculatedStatistics (0 rows) - calculated weather stats
+
+registry_version: "2.0"
+source_system: timescaledb
+source_database: weather-station
+table_prefix: weather_
+target_catalog: wakecap_prod
+target_schema: raw
+
+defaults:
+  source_schema: public
+  watermark_type: timestamp
+  is_full_load: true  # All weather tables are small reference tables
+  fetch_size: 10000
+  batch_size: 50000
+  enabled: true
+
+tables:
+  # ===================
+  # DIMENSIONS (Config)
+  # ===================
+
+  - source_table: Indicator
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true  # Small reference table
+    comment: "Weather indicators (temperature, humidity, etc.) - 13 rows"
+
+  - source_table: Graph
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true  # Small reference table
+    comment: "Graph configurations - 11 rows"
+
+  - source_table: HeatIndexStatus
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true  # Small reference table
+    comment: "Heat index threshold definitions - 5 rows"
+
+  - source_table: Report
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true  # Small reference table
+    comment: "Report configurations - 1 row"
+
+  - source_table: ProjectSettings
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true  # Small reference table
+    comment: "Project-specific weather settings with JSONB - 44 rows"
+
+  - source_table: ProjectThreshold
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    category: dimensions
+    is_full_load: true  # Small reference table
+    comment: "Weather alert thresholds per project - 41 rows"
+
+  # ===================
+  # FACTS (Data)
+  # ===================
+
+  - source_table: CalculatedStatistics
+    primary_key_columns: [Id]
+    watermark_column: UpdatedAt
+    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    category: facts
+    is_full_load: true  # Currently empty table
+    comment: "Calculated weather statistics - currently empty"
+
+excluded_tables:
+  - source_table: __EFMigrationsHistory
+    reason: "EF Core migrations history - not needed"

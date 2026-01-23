@@ -63,6 +63,39 @@ class DatabricksCredentials:
         return f"https://{self.host}"
 
 
+@dataclass
+class RequiredLibrary:
+    """A library required for notebook execution."""
+    name: str
+    type: str  # "whl", "pypi", "jar"
+    path: Optional[str] = None  # For whl/jar
+    package: Optional[str] = None  # For pypi
+    preinstalled: bool = False  # True if library is pre-installed on Databricks
+
+
+@dataclass
+class ComputeConfig:
+    """Compute/cluster configuration for notebook execution."""
+    cluster_name: str
+    cluster_id: Optional[str] = None
+    required_libraries: Optional[list] = None
+
+    def get_required_libraries(self) -> list:
+        """Get required libraries as list of dicts for DatabricksClient."""
+        if not self.required_libraries:
+            return []
+        return [
+            {
+                "name": lib.name,
+                "type": lib.type,
+                "path": lib.path,
+                "package": lib.package,
+                "preinstalled": lib.preinstalled,
+            }
+            for lib in self.required_libraries
+        ]
+
+
 class CredentialsManager:
     """
     Manages credentials for Lakebridge migrations.
@@ -89,6 +122,7 @@ class CredentialsManager:
         self._config: dict = {}
         self._sqlserver: Optional[SQLServerCredentials] = None
         self._databricks: Optional[DatabricksCredentials] = None
+        self._compute: Optional[ComputeConfig] = None
 
     def load(self) -> "CredentialsManager":
         """Load credentials from YAML file."""
@@ -103,6 +137,7 @@ class CredentialsManager:
 
         self._parse_sqlserver()
         self._parse_databricks()
+        self._parse_compute()
 
         return self
 
@@ -142,6 +177,32 @@ class CredentialsManager:
             schema=db["schema"],
         )
 
+    def _parse_compute(self) -> None:
+        """Parse compute/cluster configuration from config."""
+        compute = self._config.get("compute", {})
+
+        if not compute:
+            # Compute config is optional
+            self._compute = None
+            return
+
+        # Parse required libraries
+        required_libs = []
+        for lib_config in compute.get("required_libraries", []):
+            required_libs.append(RequiredLibrary(
+                name=lib_config.get("name", "unknown"),
+                type=lib_config.get("type", "whl"),
+                path=lib_config.get("path"),
+                package=lib_config.get("package"),
+                preinstalled=lib_config.get("preinstalled", False),
+            ))
+
+        self._compute = ComputeConfig(
+            cluster_name=compute.get("cluster_name", ""),
+            cluster_id=compute.get("cluster_id"),
+            required_libraries=required_libs if required_libs else None,
+        )
+
     @property
     def sqlserver(self) -> SQLServerCredentials:
         """Get SQL Server credentials."""
@@ -155,6 +216,11 @@ class CredentialsManager:
         if self._databricks is None:
             raise RuntimeError("Credentials not loaded. Call load() first.")
         return self._databricks
+
+    @property
+    def compute(self) -> Optional[ComputeConfig]:
+        """Get compute/cluster configuration (may be None if not configured)."""
+        return self._compute
 
     @property
     def secret_scope(self) -> str:

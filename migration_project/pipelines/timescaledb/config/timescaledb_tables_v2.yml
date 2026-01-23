@@ -420,24 +420,34 @@ tables:
     watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
     category: facts
 
+  # DeviceLocation - Large hypertable (82M rows, 52GB)
+  # Partitioned by GeneratedAt (14-day chunks)
+  # Note: UpdatedAt is NULL for all rows, so we use GeneratedAt directly
   - source_table: DeviceLocation
-    primary_key_columns: [Id]
-    watermark_column: UpdatedAt
-    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
+    primary_key_columns: [DeviceId, ProjectId, ActiveSequance, InactiveSequance, GeneratedAt]
+    watermark_column: GeneratedAt
+    # No GREATEST needed - GeneratedAt is the definitive timestamp and never null
     category: facts
     has_geometry: true
-    geometry_columns: [Geometry]
+    geometry_columns: [Point]
+    fetch_size: 100000
+    batch_size: 500000
+    is_hypertable: true
+    comment: "Large hypertable - ~50M rows/month, partitioned by GeneratedAt"
+
+  # DeviceLocationSummary - Daily aggregated hypertable (848K rows, 3.8GB)
+  # Partitioned by Day (30-day chunks)
+  - source_table: DeviceLocationSummary
+    primary_key_columns: [Day, DeviceId, ProjectId]
+    watermark_column: GeneratedAt
+    # Use GeneratedAt for consistency with DeviceLocation
+    category: facts
+    has_geometry: true
+    geometry_columns: [Point, ConfidenceArea]
     fetch_size: 50000
     batch_size: 200000
-
-  - source_table: DeviceLocationSummary
-    primary_key_columns: [Id]
-    watermark_column: UpdatedAt
-    watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
-    category: facts
-    has_geometry: true
-    geometry_columns: [Geometry]
-    fetch_size: 50000
+    is_hypertable: true
+    comment: "Daily summary hypertable - ~400K rows/month"
 
   - source_table: EquipmentTelemetry
     primary_key_columns: [Id]

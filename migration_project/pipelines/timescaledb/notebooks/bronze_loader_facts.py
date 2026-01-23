@@ -164,28 +164,44 @@ print(f"Completed loading {len(results)} fact tables")
 
 # COMMAND ----------
 
-# Create detailed summary DataFrame
+# Create detailed summary DataFrame with explicit schema to handle empty results or all-null columns
 from pyspark.sql import Row
 from pyspark.sql.types import StructType, StructField, StringType, LongType, DoubleType
 
-summary_data = [
-    Row(
-        table=r.table_config.source_table,
-        category=r.table_config.category,
-        status=r.status.value,
-        rows_loaded=r.rows_loaded,
-        duration_seconds=round(r.duration_seconds, 2) if r.duration_seconds else 0.0,
-        rows_per_second=round(r.rows_loaded / r.duration_seconds, 0) if r.duration_seconds and r.duration_seconds > 0 else 0,
-        partition_column=r.table_config.partition_column or "N/A",
-        previous_watermark=str(r.previous_watermark)[:25] if r.previous_watermark else "N/A",
-        new_watermark=str(r.new_watermark)[:25] if r.new_watermark else "N/A",
-        error=r.error_message[:100] if r.error_message else None
-    )
-    for r in results
-]
+# Define explicit schema to avoid [CANNOT_DETERMINE_TYPE] error when error column is all NULL
+summary_schema = StructType([
+    StructField("table", StringType(), True),
+    StructField("category", StringType(), True),
+    StructField("status", StringType(), True),
+    StructField("rows_loaded", LongType(), True),
+    StructField("duration_seconds", DoubleType(), True),
+    StructField("rows_per_second", DoubleType(), True),
+    StructField("partition_column", StringType(), True),
+    StructField("previous_watermark", StringType(), True),
+    StructField("new_watermark", StringType(), True),
+    StructField("error", StringType(), True)
+])
 
-summary_df = spark.createDataFrame(summary_data)
-display(summary_df.orderBy("table"))
+if results:
+    summary_data = [
+        Row(
+            table=r.table_config.source_table,
+            category=r.table_config.category,
+            status=r.status.value,
+            rows_loaded=r.rows_loaded,
+            duration_seconds=round(r.duration_seconds, 2) if r.duration_seconds else 0.0,
+            rows_per_second=round(r.rows_loaded / r.duration_seconds, 0) if r.duration_seconds and r.duration_seconds > 0 else 0,
+            partition_column=r.table_config.partition_column or "N/A",
+            previous_watermark=str(r.previous_watermark)[:25] if r.previous_watermark else "N/A",
+            new_watermark=str(r.new_watermark)[:25] if r.new_watermark else "N/A",
+            error=r.error_message[:100] if r.error_message else None
+        )
+        for r in results
+    ]
+    summary_df = spark.createDataFrame(summary_data, schema=summary_schema)
+    display(summary_df.orderBy("table"))
+else:
+    print("No tables were loaded - results list is empty")
 
 # COMMAND ----------
 

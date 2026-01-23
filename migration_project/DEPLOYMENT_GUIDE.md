@@ -22,6 +22,16 @@ This guide provides step-by-step instructions for deploying the WakeCapDW migrat
 
 ## Phase 1: Bronze Layer - TimescaleDB Ingestion
 
+**Status: COMPLETE (Initial Load Done 2026-01-22)**
+
+| Metric | Value |
+|--------|-------|
+| Tables Loaded | 78 |
+| Target Schema | wakecap_prod.raw |
+| Table Prefix | timescale_* |
+| Load Method | JDBC + Watermark-based incremental |
+| Geometry Tables | 9 (with ST_AsText conversion) |
+
 The migration uses **Databricks notebooks with JDBC** to read directly from TimescaleDB, using watermark-based incremental extraction.
 
 ### Architecture
@@ -203,6 +213,104 @@ Or check watermarks:
 ```bash
 python check_watermarks.py
 ```
+
+### 1.7 DeviceLocation Optimization (Large Tables)
+
+**Updated: 2026-01-22**
+
+DeviceLocation and DeviceLocationSummary are large TimescaleDB hypertables requiring special handling.
+
+| Table | Rows | Size | Special Handling |
+|-------|------|------|------------------|
+| DeviceLocation | 82M | 52GB | Composite PK, GeneratedAt watermark |
+| DeviceLocationSummary | 848K | 3.8GB | Composite PK, GeneratedAt watermark |
+
+**Key Configuration Changes:**
+
+| Table | Old Config | New Config |
+|-------|------------|------------|
+| DeviceLocation PK | `[Id]` | `[DeviceId, ProjectId, ActiveSequance, InactiveSequance, GeneratedAt]` |
+| DeviceLocation Watermark | `UpdatedAt` (NULL!) | `GeneratedAt` |
+| DeviceLocation Geometry | `Geometry` | `Point` |
+| DeviceLocationSummary PK | `[Id]` | `[Day, DeviceId, ProjectId]` |
+| DeviceLocationSummary Geometry | `Geometry` | `Point, ConfidenceArea` |
+
+**To Reset and Reload DeviceLocation Tables:**
+
+**Step 1: Reset Watermarks (via SQL Warehouse)**
+```bash
+cd migration_project
+python run_with_serverless.py
+```
+
+This will:
+- Delete existing watermark entries for DeviceLocation tables
+- Drop existing target tables
+- Use Serverless SQL Warehouse (auto-starts if stopped)
+
+**Step 2: Run Full Load (via Databricks UI)**
+
+1. Open notebook: `/Workspace/migration_project/pipelines/timescaledb/notebooks/bronze_loader_devicelocation`
+2. Attach to cluster with Unity Catalog access
+3. Set parameters:
+   - `load_mode` = `full`
+   - `run_optimize` = `yes`
+4. Run All cells
+
+**Databricks-side Optimizations Applied:**
+```sql
+-- Z-ORDER for query performance
+OPTIMIZE wakecap_prod.raw.timescale_devicelocation ZORDER BY (ProjectId, GeneratedAt);
+OPTIMIZE wakecap_prod.raw.timescale_devicelocationsummary ZORDER BY (ProjectId, Day);
+
+-- Table properties
+ALTER TABLE wakecap_prod.raw.timescale_devicelocation SET TBLPROPERTIES (
+    'delta.autoOptimize.optimizeWrite' = 'true',
+    'delta.autoOptimize.autoCompact' = 'true',
+    'delta.targetFileSize' = '128mb'
+);
+```
+
+**Dedicated Notebooks:**
+| Notebook | Purpose |
+|----------|---------|
+| `reset_devicelocation_watermarks` | Reset watermarks for fresh load |
+| `bronze_loader_devicelocation` | Optimized loader with correct PKs |
+| `optimize_devicelocation` | Z-ORDER optimization |
+
+### 1.8 Loaded Tables Summary
+
+**78 tables loaded to wakecap_prod.raw:**
+
+| Category | Count | Examples |
+|----------|-------|----------|
+| Dimensions | 35 | Company, People, Zone, Trade, Department |
+| Assignments | 18 | WorkshiftResourceAssignment, LocationGroupZone |
+| Facts | 20 | ResourceZone, ResourceHours, EquipmentTelemetry |
+| History | 3 | SpaceHistory, ZoneHistory, ZoneViolationLog |
+
+**22 tables match SQL Server stg.wc2023_* tables** - these are the core dimension and fact tables that were in the original SQL Server staging layer.
+
+**56 tables are TimescaleDB-only** - these include equipment telemetry, certificates, training, permits, and other data not previously in the SQL Server staging.
+
+### 1.9 Tables NOT Yet Migrated
+
+The following SQL Server `stg.wc2023_*` tables are **NOT** in the Bronze layer:
+
+| Table | Notes |
+|-------|-------|
+| observation_* (7 tables) | Observation dimension tables - may need separate load |
+| organization | Organization hierarchy |
+| Project | Project dimension |
+| weather_station_sensor | Weather data |
+| *_full tables (8) | Full-refresh staging variants - may not need migration |
+| asset_location* | Asset tracking data |
+| node | Graph/hierarchy data |
+
+**Recommendation:** Review whether these tables should be loaded from:
+1. SQL Server directly (using JDBC)
+2. TimescaleDB (if data exists there)
+3. Skipped (if they are staging variants or deprecated)
 
 ---
 
@@ -502,5 +610,13 @@ For issues with this migration:
 4. Compare source data with converted Delta tables
 
 ---
+
+## Update Log
+
+| Date | Update |
+|------|--------|
+| 2026-01-22 | Added DeviceLocation optimization section (1.7) - correct PKs, GeneratedAt watermark |
+| 2026-01-22 | Phase 1 (Bronze Layer) marked COMPLETE - 78 tables loaded |
+| 2026-01-22 | Updated TimescaleDB ingestion documentation |
 
 *Last updated: 2026-01-22*
