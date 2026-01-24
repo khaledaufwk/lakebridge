@@ -216,14 +216,27 @@ python check_watermarks.py
 
 ### 1.7 DeviceLocation Optimization (Large Tables)
 
-**Updated: 2026-01-22**
+**Updated: 2026-01-24**
 
 DeviceLocation and DeviceLocationSummary are large TimescaleDB hypertables requiring special handling.
 
 | Table | Rows | Size | Special Handling |
 |-------|------|------|------------------|
-| DeviceLocation | 82M | 52GB | Composite PK, GeneratedAt watermark |
-| DeviceLocationSummary | 848K | 3.8GB | Composite PK, GeneratedAt watermark |
+| DeviceLocation | 85M | 52GB | Composite PK, GeneratedAt watermark, **Append-only** |
+| DeviceLocationSummary | 7M | 3.8GB | Composite PK, GeneratedAt watermark, **Append-only** |
+| EquipmentTelemetry | 0.8M | - | Hypertable, CreatedAt watermark, **Append-only** |
+| Inspection | ~50K | - | CreatedAt-only watermark, **Append-only** |
+| ViewFactWorkshiftsCache | ~2M | - | Hypertable, WatermarkUTC, **Append-only** |
+
+#### Append-Only Mode Optimization
+
+Tables marked as `is_append_only: true` use direct APPEND instead of MERGE operations, providing ~3-4x faster load times.
+
+**How to identify append-only candidates:**
+- Hypertables (TimescaleDB partitioned tables)
+- Tables using only `CreatedAt` watermark (no UpdatedAt in GREATEST expression)
+- Log/telemetry tables that never update existing rows
+- Cache tables refreshed by insert
 
 **Key Configuration Changes:**
 
@@ -314,7 +327,175 @@ The following SQL Server `stg.wc2023_*` tables are **NOT** in the Bronze layer:
 
 ---
 
-## Phase 2: Unity Catalog Setup
+## Phase 2: Silver Layer - Data Transformation
+
+**Status: DEPLOYED (2026-01-24)**
+
+| Metric | Value |
+|--------|-------|
+| Tables Deployed | 77 |
+| Target Schema | wakecap_prod.silver |
+| Job Name | WakeCapDW_Silver_TimescaleDB |
+| Job ID | 181959206191493 |
+| Load Method | Watermark-based incremental from Bronze `_loaded_at` |
+| Schedule | Daily 3:00 AM UTC (Paused initially) |
+
+The Silver layer uses a **standalone notebook pattern** (not DLT) with watermark-based incremental loading from the Bronze layer.
+
+### Architecture
+
+```
+┌─────────────────────┐     Watermark      ┌─────────────────────┐
+│  Bronze Layer       │ ────────────────>  │  Silver Layer       │
+│  wakecap_prod.raw   │  (_loaded_at)      │  wakecap_prod.silver│
+│  (78 timescale_*)   │                    │  (77 silver_*)      │
+└─────────────────────┘                    └─────────────────────┘
+                                                   │
+                                                   ▼
+                                          ┌─────────────────────┐
+                                          │ _silver_watermarks  │
+                                          │ (tracking table)    │
+                                          └─────────────────────┘
+```
+
+### 2.1 Deploy Silver Layer
+
+**Option A: Python Script (Recommended)**
+```bash
+cd migration_project
+python deploy_silver_layer.py
+```
+
+This will:
+1. Create Silver schema (wakecap_prod.silver)
+2. Create watermark tracking table
+3. Upload notebook and config files
+4. Create Databricks Job with 8 tasks
+
+**Option B: Manual Deployment**
+```bash
+# Create workspace directories
+databricks workspace mkdirs /Workspace/migration_project/pipelines/silver/notebooks
+databricks workspace mkdirs /Workspace/migration_project/pipelines/silver/config
+
+# Upload notebook
+databricks workspace import pipelines/silver/notebooks/silver_loader.py \
+    /Workspace/migration_project/pipelines/silver/notebooks/silver_loader \
+    --format SOURCE --language PYTHON --overwrite
+
+# Upload config
+databricks workspace import pipelines/silver/config/silver_tables.yml \
+    /Workspace/migration_project/pipelines/silver/config/silver_tables.yml \
+    --format AUTO --overwrite
+```
+
+### 2.2 Job Structure
+
+The Silver job has 8 tasks with dependencies:
+
+```
+Task Dependencies:
+──────────────────────────────────────────────────────────────────
+silver_independent_dimensions ─┐
+                               ├──> silver_project_children ──> silver_zone_dependent ─┬──> silver_assignments ──> silver_facts
+silver_organization ──> silver_project ─┘                                               └──> silver_history
+```
+
+| Task | Processing Group | Tables | Workers |
+|------|------------------|--------|---------|
+| silver_independent_dimensions | independent_dimensions | 11 | 2 |
+| silver_organization | organization | 2 | 2 |
+| silver_project | project_dependent | 1 | 2 |
+| silver_project_children | project_children | 16 | 2 |
+| silver_zone_dependent | zone_dependent | 7 | 2 |
+| silver_assignments | assignments | 17 | 2 |
+| silver_facts | facts | 20 | 4 |
+| silver_history | history | 3 | 2 |
+
+### 2.3 Run Initial Load
+
+1. Open Databricks > Workflows > Jobs
+2. Find "WakeCapDW_Silver_TimescaleDB" (Job ID: 181959206191493)
+3. Click "Run Now"
+4. Monitor task execution in the Runs tab
+
+**Job URL:** https://adb-3022397433351638.18.azuredatabricks.net/jobs/181959206191493
+
+Or via CLI:
+```bash
+databricks jobs run-now --job-id 181959206191493
+```
+
+### 2.4 Verify Silver Tables
+
+```sql
+-- Check Silver tables created
+SHOW TABLES IN wakecap_prod.silver;
+
+-- Check watermarks
+SELECT table_name, processing_group, last_load_status,
+       last_load_row_count, rows_dropped_critical,
+       rows_flagged_business, last_bronze_watermark
+FROM wakecap_prod.migration._silver_watermarks
+ORDER BY processing_group, table_name;
+
+-- Row count reconciliation
+SELECT 'bronze' as layer, COUNT(*) as cnt
+FROM wakecap_prod.raw.timescale_company
+WHERE "DeletedAt" IS NULL
+UNION ALL
+SELECT 'silver_org' as layer, COUNT(*) as cnt
+FROM wakecap_prod.silver.silver_organization;
+
+-- FK integrity check
+SELECT COUNT(*) AS orphaned_projects
+FROM wakecap_prod.silver.silver_project p
+LEFT JOIN wakecap_prod.silver.silver_organization o
+  ON p.OrganizationId = o.OrganizationId
+WHERE p.OrganizationId IS NOT NULL
+  AND o.OrganizationId IS NULL;
+```
+
+### 2.5 Enable Schedule
+
+After successful initial load:
+1. Go to job settings
+2. Change schedule from "Paused" to "Active"
+3. Schedule: Daily 3:00 AM UTC (1 hour after Bronze job)
+
+### 2.6 Data Quality Validation
+
+The Silver layer implements 3-tier data quality:
+
+| Tier | Action | Example |
+|------|--------|---------|
+| Critical | Drop rows | `Id IS NOT NULL` |
+| Business | Log, keep rows | `DeletedAt IS NULL` |
+| Advisory | Warn only | `Latitude BETWEEN -90 AND 90` |
+
+Check DQ metrics in watermark table:
+```sql
+SELECT table_name,
+       rows_input,
+       rows_dropped_critical,
+       rows_flagged_business,
+       rows_warned_advisory
+FROM wakecap_prod.migration._silver_watermarks
+WHERE rows_dropped_critical > 0 OR rows_flagged_business > 0;
+```
+
+### 2.7 Silver Layer Files
+
+| Category | File | Workspace Path |
+|----------|------|----------------|
+| Notebook | silver_loader.py | /Workspace/migration_project/pipelines/silver/notebooks/silver_loader |
+| Config | silver_tables.yml | /Workspace/migration_project/pipelines/silver/config/silver_tables.yml |
+| DDL | create_silver_watermarks.sql | /Workspace/migration_project/pipelines/silver/ddl/create_silver_watermarks.sql |
+| Deploy | deploy_silver_layer.py | Local script |
+
+---
+
+## Phase 4: Unity Catalog Setup
 
 ### 2.1 Create Service Principal (if not using Managed Identity)
 
@@ -354,7 +535,7 @@ databricks secrets put-secret wakecap-secrets sp-client-secret --string-value "y
 
 ---
 
-## Phase 3: DLT Pipeline Deployment
+## Phase 5: DLT Pipeline Deployment (Gold Layer)
 
 ### 3.1 Upload Notebooks to Workspace
 
@@ -424,7 +605,7 @@ Or via UI:
 
 ---
 
-## Phase 4: Validation
+## Phase 6: Validation
 
 ### 4.1 Run Validation Notebook
 
@@ -468,7 +649,7 @@ Or via UI:
 
 ---
 
-## Phase 5: Production Deployment
+## Phase 7: Production Deployment
 
 ### 5.1 Switch to Production Mode
 
@@ -562,42 +743,54 @@ SET ROW FILTER security.organization_filter ON (OrganizationID);
 ## Data Flow Summary
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                        DATA FLOW                                     │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                      │
-│  TimescaleDB (wakecap_app)                                          │
-│       │                                                              │
-│       │ JDBC (PostgreSQL driver)                                    │
-│       │ Watermark-based incremental                                 │
-│       ▼                                                              │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  BRONZE LAYER (wakecap_prod.raw)                            │   │
-│  │  - 81 tables: timescale_*                                   │   │
-│  │  - Job: WakeCapDW_Bronze_TimescaleDB_Raw                    │   │
-│  │  - Watermarks: _timescaledb_watermarks                      │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│       │                                                              │
-│       │ DLT Pipeline (streaming/batch)                              │
-│       ▼                                                              │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  SILVER LAYER (wakecap_prod.silver)                         │   │
-│  │  - Data quality expectations                                │   │
-│  │  - Deduplication                                            │   │
-│  │  - Type standardization                                     │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│       │                                                              │
-│       │ DLT transformations                                         │
-│       ▼                                                              │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │  GOLD LAYER (wakecap_prod.gold)                             │   │
-│  │  - Business views                                           │   │
-│  │  - Aggregations                                             │   │
-│  │  - Row-level security                                       │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-│                                                                      │
-└─────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────┐
+│                             DATA FLOW                                      │
+├───────────────────────────────────────────────────────────────────────────┤
+│                                                                            │
+│  TimescaleDB (wakecap_app)                                                │
+│       │                                                                    │
+│       │ JDBC (PostgreSQL driver)                                          │
+│       │ Watermark-based incremental                                       │
+│       ▼                                                                    │
+│  ┌─────────────────────────────────────────────────────────────────────┐ │
+│  │  BRONZE LAYER (wakecap_prod.raw)                                    │ │
+│  │  - 78 tables: timescale_*                                           │ │
+│  │  - Job: WakeCapDW_Bronze_TimescaleDB_Raw                            │ │
+│  │  - Schedule: Daily 2:00 AM UTC                                      │ │
+│  │  - Watermarks: _timescaledb_watermarks                              │ │
+│  └─────────────────────────────────────────────────────────────────────┘ │
+│       │                                                                    │
+│       │ Standalone Notebook (watermark on _loaded_at)                     │
+│       ▼                                                                    │
+│  ┌─────────────────────────────────────────────────────────────────────┐ │
+│  │  SILVER LAYER (wakecap_prod.silver)                      DEPLOYED   │ │
+│  │  - 77 tables: silver_*                                              │ │
+│  │  - Job: WakeCapDW_Silver_TimescaleDB (ID: 181959206191493)          │ │
+│  │  - Schedule: Daily 3:00 AM UTC                                      │ │
+│  │  - 8 tasks with dependency chain                                    │ │
+│  │  - 3-tier DQ validation (critical/business/advisory)                │ │
+│  │  - Watermarks: _silver_watermarks                                   │ │
+│  └─────────────────────────────────────────────────────────────────────┘ │
+│       │                                                                    │
+│       │ DLT transformations                                               │
+│       ▼                                                                    │
+│  ┌─────────────────────────────────────────────────────────────────────┐ │
+│  │  GOLD LAYER (wakecap_prod.gold)                          PENDING    │ │
+│  │  - Business views                                                   │ │
+│  │  - Aggregations                                                     │ │
+│  │  - Row-level security                                               │ │
+│  └─────────────────────────────────────────────────────────────────────┘ │
+│                                                                            │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Schedule Coordination
+
+| Job | Schedule | Purpose |
+|-----|----------|---------|
+| WakeCapDW_Bronze_TimescaleDB_Raw | 2:00 AM UTC | Bronze layer from TimescaleDB |
+| WakeCapDW_Silver_TimescaleDB | 3:00 AM UTC | Silver layer transformations |
+| Gold Layer (Future) | 4:00 AM UTC | Gold layer views |
 
 ---
 
@@ -615,8 +808,12 @@ For issues with this migration:
 
 | Date | Update |
 |------|--------|
+| 2026-01-24 | **Silver layer DEPLOYED** - Added Phase 2 with Job ID 181959206191493 |
+| 2026-01-24 | Added Silver job structure (8 tasks, 77 tables) |
+| 2026-01-24 | Updated data flow diagram with Silver layer details |
+| 2026-01-24 | Added append-only mode documentation for 5 large/hypertable tables |
 | 2026-01-22 | Added DeviceLocation optimization section (1.7) - correct PKs, GeneratedAt watermark |
 | 2026-01-22 | Phase 1 (Bronze Layer) marked COMPLETE - 78 tables loaded |
 | 2026-01-22 | Updated TimescaleDB ingestion documentation |
 
-*Last updated: 2026-01-22*
+*Last updated: 2026-01-24*

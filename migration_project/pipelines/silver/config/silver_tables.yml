@@ -1,0 +1,2500 @@
+# Silver Layer Table Registry - WakeCapDW
+# ========================================
+# Generated: 2026-01-23
+# Source: wakecap_prod.raw (Bronze layer from TimescaleDB)
+# Target: wakecap_prod.silver
+#
+# This registry defines all 78 Silver tables with:
+# - Source Bronze table mapping
+# - Column transformations
+# - Data quality expectations (3-tier: critical/business/advisory)
+# - Processing group for dependency ordering
+# ========================================
+
+registry_version: '1.0'
+source_catalog: wakecap_prod
+source_schema: raw
+target_catalog: wakecap_prod
+target_schema: silver
+generated_date: '2026-01-23'
+
+# Processing groups control dependency order
+# Tables within a group can be processed in parallel
+# Groups must be processed sequentially
+processing_groups:
+  - group: independent_dimensions
+    order: 1
+    description: "Standalone dimension tables with no FK dependencies"
+    tables:
+      - silver_company_type
+      - silver_crew_type
+      - silver_discipline
+      - silver_equipment_type
+      - silver_expiry_duration
+      - silver_nationality
+      - silver_people_title
+      - silver_registration_type
+      - silver_zone_category
+      - silver_certificate_type
+      - silver_crew_productivity_status
+
+  - group: organization
+    order: 2
+    description: "Organization from Company table"
+    tables:
+      - silver_organization
+      - silver_device
+
+  - group: project_dependent
+    order: 3
+    depends_on: [organization]
+    description: "Project depends on organization"
+    tables:
+      - silver_project
+
+  - group: project_children
+    order: 4
+    depends_on: [project_dependent]
+    description: "Dimensions that depend on project"
+    tables:
+      - silver_worker
+      - silver_crew
+      - silver_trade
+      - silver_workshift
+      - silver_floor
+      - silver_location_group
+      - silver_activity
+      - silver_department
+      - silver_data_group
+      - silver_delay_reason
+      - silver_equipment
+      - silver_obs
+      - silver_package
+      - silver_training
+      - silver_work_area
+      - silver_blueprint
+
+  - group: zone_dependent
+    order: 5
+    depends_on: [project_children]
+    description: "Tables that depend on floor/zone hierarchy"
+    tables:
+      - silver_zone
+      - silver_obs_current
+      - silver_workshift_day
+      - silver_workshift_schedule
+      - silver_workshift_schedule_break
+      - silver_crew_composition
+      - silver_crew_manager
+
+  - group: assignments
+    order: 6
+    depends_on: [zone_dependent]
+    description: "Assignment/bridge tables with FK validation"
+    tables:
+      - silver_location_group_zone
+      - silver_resource_device
+      - silver_workshift_resource_assignment
+      - silver_zone_authorized_resource
+      - silver_manual_location_assignment
+      - silver_certificate
+      - silver_training_session
+      - silver_training_session_trainee
+      - silver_calendar_period
+      - silver_equipment_certificates_types
+      - silver_equipment_operators
+      - silver_permit_activity
+      - silver_progress_data_group
+      - silver_progress_delay_reason
+      - silver_work_permit
+      - silver_work_permit_activity
+      - silver_assigned_workshift_attendance_scope
+
+  - group: facts
+    order: 7
+    depends_on: [assignments]
+    description: "Fact tables - core analytics data"
+    tables:
+      - silver_fact_workers_history
+      - silver_fact_device_location_summary
+      - silver_fact_equipment_telemetry
+      - silver_fact_resource_hours
+      - silver_fact_resource_timesheet
+      - silver_fact_resource_zone
+      - silver_fact_resource_attendance
+      - silver_fact_resource_approved_hours
+      - silver_fact_resource_hours_segment
+      - silver_fact_attendance_consolidated
+      - silver_fact_co2_inspection
+      - silver_fact_inspection
+      - silver_fact_plan
+      - silver_fact_plan_progress
+      - silver_fact_plan_progress_delay
+      - silver_fact_plan_progress_resource
+      - silver_fact_sgs_attendance
+      - silver_fact_sgs_roster
+      - silver_fact_workshifts_cache
+      - silver_fact_novade_work_permit
+
+  - group: history
+    order: 8
+    depends_on: [zone_dependent]
+    description: "History/audit tables"
+    tables:
+      - silver_history_space
+      - silver_history_zone
+      - silver_history_zone_violation
+
+# ============================================
+# TABLE DEFINITIONS
+# ============================================
+
+tables:
+  # ===========================================
+  # INDEPENDENT DIMENSIONS (no FK dependencies)
+  # ===========================================
+
+  - name: silver_company_type
+    source_bronze_table: timescale_companytype
+    primary_key_columns: [Id]
+    processing_group: independent_dimensions
+    transformation_type: pass_through
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: Name
+        target: CompanyTypeName
+        transform: TRIM
+
+  - name: silver_crew_type
+    source_bronze_table: timescale_crewtype
+    primary_key_columns: [Id]
+    processing_group: independent_dimensions
+    transformation_type: soft_delete_filter
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: CrewTypeId
+      - source: ProjectId
+        target: ProjectId
+      - source: Type
+        target: CrewTypeName
+        transform: TRIM
+      - source: TypeCode
+        target: CrewTypeCode
+        transform: TRIM
+      - source: DeletedAt
+        target: DeletedAt
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_discipline
+    source_bronze_table: timescale_discipline
+    primary_key_columns: [Id]
+    processing_group: independent_dimensions
+    transformation_type: pass_through
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: Name
+        target: DisciplineName
+        transform: TRIM
+
+  - name: silver_equipment_type
+    source_bronze_table: timescale_equipmenttype
+    primary_key_columns: [Id]
+    processing_group: independent_dimensions
+    transformation_type: pass_through
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: Name
+        target: EquipmentTypeName
+        transform: TRIM
+
+  - name: silver_expiry_duration
+    source_bronze_table: timescale_expiryduration
+    primary_key_columns: [Id]
+    processing_group: independent_dimensions
+    transformation_type: pass_through
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: ExpiryDurationId
+      - source: Name
+        target: ExpiryDurationName
+        transform: TRIM
+      - source: Order
+        target: DisplayOrder
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_nationality
+    source_bronze_table: timescale_nationality
+    primary_key_columns: [Id]
+    processing_group: independent_dimensions
+    transformation_type: pass_through
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: NationalityId
+      - source: Name
+        target: NationalityName
+        transform: TRIM
+
+  - name: silver_people_title
+    source_bronze_table: timescale_peopletitle
+    primary_key_columns: [Id]
+    processing_group: independent_dimensions
+    transformation_type: soft_delete_filter
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: PeopleTitleId
+      - source: ProjectId
+        target: ProjectId
+      - source: Code
+        target: TitleCode
+        transform: TRIM
+      - source: Title
+        target: TitleName
+        transform: TRIM
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_registration_type
+    source_bronze_table: timescale_registrationtype
+    primary_key_columns: [Id]
+    processing_group: independent_dimensions
+    transformation_type: pass_through
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: Name
+        target: RegistrationTypeName
+        transform: TRIM
+
+  - name: silver_zone_category
+    source_bronze_table: timescale_zonecategory
+    primary_key_columns: [Id]
+    processing_group: independent_dimensions
+    transformation_type: pass_through
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: Name
+        target: ZoneCategoryName
+        transform: TRIM
+
+  - name: silver_certificate_type
+    source_bronze_table: timescale_certificatetype
+    primary_key_columns: [Id]
+    processing_group: independent_dimensions
+    transformation_type: pass_through
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: Name
+        target: CertificateTypeName
+        transform: TRIM
+
+  - name: silver_crew_productivity_status
+    source_bronze_table: timescale_crewproductivitystatus
+    primary_key_columns: [Id]
+    processing_group: independent_dimensions
+    transformation_type: pass_through
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: CrewProductivityStatusId
+      - source: CrewId
+        target: CrewId
+      - source: ManagerId
+        target: ManagerId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  # ===========================================
+  # ORGANIZATION (from Company table)
+  # ===========================================
+
+  - name: silver_organization
+    source_bronze_table: timescale_company
+    primary_key_columns: [Id]
+    processing_group: organization
+    transformation_type: filter_transform
+    source_filter: "ProjectId IS NULL"
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+        - "Name IS NOT NULL AND LENGTH(TRIM(Name)) > 0"
+      business:
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: OrganizationId
+      - source: Name
+        target: OrganizationName
+        transform: TRIM
+      - source: Code
+        target: OrganizationCode
+        transform: TRIM
+      - source: Description
+        target: Description
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_device
+    source_bronze_table: timescale_avldevice
+    primary_key_columns: [Id]
+    processing_group: organization
+    transformation_type: pass_through
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: DeviceId
+      - source: Name
+        target: DeviceName
+        transform: TRIM
+      - source: Imei
+        target: Imei
+        transform: TRIM
+      - source: Apn
+        target: Apn
+      - source: Email
+        target: Email
+      - source: ProjectId
+        target: ProjectId
+      - source: OwnerId
+        target: OwnerId
+      - source: EquipmentId
+        target: EquipmentId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  # ===========================================
+  # PROJECT (depends on organization)
+  # ===========================================
+
+  - name: silver_project
+    source_bronze_table: timescale_company
+    primary_key_columns: [Id]
+    processing_group: project_dependent
+    transformation_type: filter_transform
+    source_filter: "ProjectId IS NOT NULL"
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+        - "Name IS NOT NULL AND LENGTH(TRIM(Name)) > 0"
+      business:
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: ProjectId
+      - source: Name
+        target: ProjectName
+        transform: TRIM
+      - source: Code
+        target: ProjectCode
+        transform: TRIM
+      - source: Description
+        target: Description
+      - source: ProjectId
+        target: OrganizationId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  # ===========================================
+  # PROJECT CHILDREN (depend on project)
+  # ===========================================
+
+  - name: silver_worker
+    source_bronze_table: timescale_people
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    comment: "Key mapping: People = Worker"
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: WorkerId
+      - source: PeopleCode
+        target: WorkerCode
+        transform: TRIM
+      - source: Name
+        target: WorkerName
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: TradeId
+        target: TradeId
+      - source: TitleId
+        target: TitleId
+      - source: DepartmentId
+        target: DepartmentId
+      - source: CompanyId
+        target: CompanyId
+      - source: Nationality
+        target: Nationality
+      - source: HelmetColor
+        target: HelmetColor
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_crew
+    source_bronze_table: timescale_crew
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: CrewId
+      - source: Code
+        target: CrewCode
+        transform: TRIM
+      - source: Name
+        target: CrewName
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: CrewTypeId
+        target: CrewTypeId
+      - source: DisciplineId
+        target: DisciplineId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_trade
+    source_bronze_table: timescale_trade
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: TradeId
+      - source: Code
+        target: TradeCode
+        transform: TRIM
+      - source: Description
+        target: TradeName
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: BackGroundColor
+        target: BackgroundColor
+      - source: TextColor
+        target: TextColor
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_workshift
+    source_bronze_table: timescale_workshift
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: pass_through
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+    columns:
+      - source: Id
+        target: WorkshiftId
+      - source: Name
+        target: WorkshiftName
+        transform: TRIM
+      - source: Type
+        target: WorkshiftType
+      - source: ProjectId
+        target: ProjectId
+      - source: Source
+        target: Source
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_floor
+    source_bronze_table: timescale_space
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    comment: "Key mapping: Space = Floor"
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: FloorId
+      - source: Name
+        target: FloorName
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: Altitude
+        target: Altitude
+      - source: Color
+        target: Color
+      - source: DeletedAt
+        target: DeletedAt
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_location_group
+    source_bronze_table: timescale_locationgroup
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: Name
+        target: LocationGroupName
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: DeletedAt
+        target: DeletedAt
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_activity
+    source_bronze_table: timescale_activity
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: pass_through
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+    columns:
+      - source: Id
+        target: ActivityId
+      - source: Description
+        target: ActivityName
+        transform: TRIM
+      - source: Code
+        target: ActivityCode
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: ParentActivityId
+        target: ParentActivityId
+      - source: Type
+        target: ActivityType
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_department
+    source_bronze_table: timescale_department
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: pass_through
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: Code
+        target: DepartmentCode
+        transform: TRIM
+      - source: Name
+        target: DepartmentName
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_data_group
+    source_bronze_table: timescale_datagroup
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: DataGroupId
+      - source: TaskTypeCode
+        target: TaskTypeCode
+        transform: TRIM
+      - source: Description
+        target: Description
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: UnitOfMeasure
+        target: UnitOfMeasure
+      - source: UnitRate
+        target: UnitRate
+      - source: TradId
+        target: TradeId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_delay_reason
+    source_bronze_table: timescale_delayreason
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: DelayReasonId
+      - source: ReasonCode
+        target: ReasonCode
+        transform: TRIM
+      - source: ReasonName
+        target: DelayReasonName
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_equipment
+    source_bronze_table: timescale_equipment
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: EquipmentId
+      - source: IMEI
+        target: IMEI
+        transform: TRIM
+      - source: QRCode
+        target: QRCode
+        transform: TRIM
+      - source: PlateNumber
+        target: PlateNumber
+        transform: TRIM
+      - source: Model
+        target: Model
+      - source: Alias
+        target: EquipmentName
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: TypeId
+        target: EquipmentTypeId
+      - source: CompanyId
+        target: CompanyId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_obs
+    source_bronze_table: timescale_obs
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: ObsId
+      - source: ProjectId
+        target: ProjectId
+      - source: TitleId
+        target: TitleId
+      - source: DeletedAt
+        target: DeletedAt
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_package
+    source_bronze_table: timescale_package
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: Name
+        target: PackageName
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: DeletedAt
+        target: DeletedAt
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_training
+    source_bronze_table: timescale_training
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: TrainingId
+      - source: Title
+        target: TrainingTitle
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: ExpiryDurationId
+        target: ExpiryDurationId
+      - source: CreatedByUserId
+        target: CreatedByUserId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_work_area
+    source_bronze_table: timescale_workarea
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: WorkAreaId
+      - source: Name
+        target: WorkAreaName
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_blueprint
+    source_bronze_table: timescale_blueprint
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: BlueprintId
+      - source: Name
+        target: BlueprintName
+        transform: TRIM
+      - source: ProjectId
+        target: ProjectId
+      - source: SpaceId
+        target: FloorId
+      - source: Order
+        target: DisplayOrder
+      - source: DeletedAt
+        target: DeletedAt
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  # ===========================================
+  # ZONE DEPENDENT (depend on floor/zone)
+  # ===========================================
+
+  - name: silver_zone
+    source_bronze_table: timescale_zone
+    primary_key_columns: [Id]
+    processing_group: zone_dependent
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: SpaceId
+        references: silver_floor.FloorId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "SpaceId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: ZoneId
+      - source: Name
+        target: ZoneName
+        transform: TRIM
+      - source: SpaceId
+        target: FloorId
+      - source: ProjectId
+        target: ProjectId
+      - source: ZoneCategoryId
+        target: ZoneCategoryId
+      - source: Height
+        target: Height
+      - source: Color
+        target: Color
+      - source: Coordinates
+        target: Coordinates
+      - source: Restricted
+        target: Restricted
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_obs_current
+    source_bronze_table: timescale_obscurrent
+    primary_key_columns: [Id]
+    processing_group: zone_dependent
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: ObsCurrentId
+      - source: ProjectId
+        target: ProjectId
+      - source: DeletedAt
+        target: DeletedAt
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_workshift_day
+    source_bronze_table: timescale_workshiftday
+    primary_key_columns: [Id]
+    processing_group: zone_dependent
+    transformation_type: pass_through
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: WorkshiftDayId
+      - source: Name
+        target: DayName
+        transform: TRIM
+      - source: Order
+        target: DayOrder
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_workshift_schedule
+    source_bronze_table: timescale_workshiftschedule
+    primary_key_columns: [Id]
+    processing_group: zone_dependent
+    transformation_type: fk_validation
+    fk_validations:
+      - column: WorkshiftId
+        references: silver_workshift.WorkshiftId
+        type: left_join
+      - column: DayId
+        references: silver_workshift_day.WorkshiftDayId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: WorkshiftScheduleId
+      - source: WorkshiftId
+        target: WorkshiftId
+      - source: DayId
+        target: WorkshiftDayId
+      - source: StartHour
+        target: StartHour
+      - source: EndHour
+        target: EndHour
+      - source: Duration
+        target: Duration
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_workshift_schedule_break
+    source_bronze_table: timescale_workshiftschedulebreak
+    primary_key_columns: [Id]
+    processing_group: zone_dependent
+    transformation_type: fk_validation
+    fk_validations:
+      - column: ScheduleId
+        references: silver_workshift_schedule.WorkshiftScheduleId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: WorkshiftScheduleBreakId
+      - source: ScheduleId
+        target: WorkshiftScheduleId
+      - source: StartHour
+        target: BreakStartHour
+      - source: EndHour
+        target: BreakEndHour
+      - source: Duration
+        target: Duration
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_crew_composition
+    source_bronze_table: timescale_crewcomposition
+    primary_key_columns: [Id]
+    processing_group: zone_dependent
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+      - column: CrewId
+        references: silver_crew.CrewId
+        type: left_join
+      - column: ResourceId
+        references: silver_worker.WorkerId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: CrewCompositionId
+      - source: ProjectId
+        target: ProjectId
+      - source: CrewId
+        target: CrewId
+      - source: ResourceId
+        target: WorkerId
+      - source: TradeId
+        target: TradeId
+      - source: DeletedAt
+        target: DeletedAt
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_crew_manager
+    source_bronze_table: timescale_crewmanager
+    primary_key_columns: [Id]
+    processing_group: zone_dependent
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+      - column: CrewId
+        references: silver_crew.CrewId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: CrewManagerId
+      - source: ProjectId
+        target: ProjectId
+      - source: CrewId
+        target: CrewId
+      - source: ManagerId
+        target: ManagerId
+      - source: EffectiveDate
+        target: EffectiveDate
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  # ===========================================
+  # ASSIGNMENTS (bridge tables with FK validation)
+  # ===========================================
+
+  - name: silver_location_group_zone
+    source_bronze_table: timescale_locationgroupzone
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: fk_validation
+    fk_validations:
+      - column: LocationGroupId
+        references: silver_location_group.Id
+        type: left_join
+      - column: ZoneId
+        references: silver_zone.ZoneId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "LocationGroupId IS NOT NULL"
+        - "ZoneId IS NOT NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: LocationGroupId
+        target: LocationGroupId
+      - source: ZoneId
+        target: ZoneId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_resource_device
+    source_bronze_table: timescale_resourcedevice
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: fk_validation
+    fk_validations:
+      - column: ResourceId
+        references: silver_worker.WorkerId
+        type: left_join
+      - column: DeviceId
+        references: silver_device.DeviceId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: ResourceDeviceId
+      - source: ResourceId
+        target: WorkerId
+      - source: DeviceId
+        target: DeviceId
+      - source: AssignedAt
+        target: AssignedAt
+      - source: UnAssignedAt
+        target: UnassignedAt
+      - source: Signature
+        target: Signature
+      - source: ActionTime
+        target: ActionTime
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_workshift_resource_assignment
+    source_bronze_table: timescale_workshiftresourceassignment
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: fk_validation
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+      - column: WorkshiftId
+        references: silver_workshift.WorkshiftId
+        type: left_join
+      - column: ResourceId
+        references: silver_worker.WorkerId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: WorkshiftResourceAssignmentId
+      - source: ProjectId
+        target: ProjectId
+      - source: WorkshiftId
+        target: WorkshiftId
+      - source: ResourceId
+        target: WorkerId
+      - source: EffectiveDate
+        target: EffectiveDate
+      - source: Source
+        target: Source
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_zone_authorized_resource
+    source_bronze_table: timescale_zoneauthorizedresource
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: fk_validation
+    fk_validations:
+      - column: ZoneId
+        references: silver_zone.ZoneId
+        type: left_join
+      - column: ResourceId
+        references: silver_worker.WorkerId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: ZoneAuthorizedResourceId
+      - source: ZoneId
+        target: ZoneId
+      - source: ResourceId
+        target: WorkerId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_manual_location_assignment
+    source_bronze_table: timescale_manuallocationassignment
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: soft_delete_filter
+    comment: "Large table (1.4M rows)"
+    batch_size: 500000
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+      - column: ResourceId
+        references: silver_worker.WorkerId
+        type: left_join
+      - column: ZoneId
+        references: silver_zone.ZoneId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: ManualLocationAssignmentId
+      - source: ProjectId
+        target: ProjectId
+      - source: ResourceId
+        target: WorkerId
+      - source: CrewId
+        target: CrewId
+      - source: ZoneId
+        target: ZoneId
+      - source: SpaceId
+        target: FloorId
+      - source: LocationGroupId
+        target: LocationGroupId
+      - source: DeletedAt
+        target: DeletedAt
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_certificate
+    source_bronze_table: timescale_certificate
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: pass_through
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+      - column: ResourceId
+        references: silver_worker.WorkerId
+        type: left_join
+      - column: CertificateTypeId
+        references: silver_certificate_type.CertificateTypeId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: CertificateId
+      - source: ProjectId
+        target: ProjectId
+      - source: Name
+        target: CertificateName
+        transform: TRIM
+      - source: ResourceId
+        target: WorkerId
+      - source: CertificateTypeId
+        target: CertificateTypeId
+      - source: IssueDate
+        target: IssueDate
+      - source: ExpiryDate
+        target: ExpiryDate
+      - source: DocumentUrl
+        target: DocumentUrl
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_training_session
+    source_bronze_table: timescale_trainingsession
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+      - column: TrainingId
+        references: silver_training.TrainingId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: TrainingSessionId
+      - source: ProjectId
+        target: ProjectId
+      - source: TrainingId
+        target: TrainingId
+      - source: Date
+        target: SessionDate
+      - source: TrainerId
+        target: TrainerId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_training_session_trainee
+    source_bronze_table: timescale_trainingsessiontrainee
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: soft_delete_filter
+    comment: "Large table (337K rows)"
+    batch_size: 500000
+    fk_validations:
+      - column: TrainingSessionId
+        references: silver_training_session.Id
+        type: left_join
+      - column: PeopleId
+        references: silver_worker.WorkerId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: TrainingSessionId
+        target: TrainingSessionId
+      - source: PeopleId
+        target: WorkerId
+      - source: DeletedAt
+        target: DeletedAt
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_calendar_period
+    source_bronze_table: timescale_calendarperiod
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: fk_validation
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+    columns:
+      - source: Id
+        target: CalendarPeriodId
+      - source: ProjectId
+        target: ProjectId
+      - source: PeriodNumber
+        target: PeriodNumber
+      - source: StartDate
+        target: StartDate
+      - source: EndDate
+        target: EndDate
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_equipment_certificates_types
+    source_bronze_table: timescale_equipmentcertificatestypes
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: fk_validation
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+      - column: EquipmentId
+        references: silver_equipment.EquipmentId
+        type: left_join
+      - column: CertificateTypeId
+        references: silver_certificate_type.CertificateTypeId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: EquipmentCertificatesTypesId
+      - source: ProjectId
+        target: ProjectId
+      - source: EquipmentId
+        target: EquipmentId
+      - source: CertificateTypeId
+        target: CertificateTypeId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_equipment_operators
+    source_bronze_table: timescale_equipmentoperators
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: fk_validation
+    fk_validations:
+      - column: EquipmentId
+        references: silver_equipment.EquipmentId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: EquipmentOperatorsId
+      - source: ProjectId
+        target: ProjectId
+      - source: EquipmentId
+        target: EquipmentId
+      - source: OperatorId
+        target: OperatorId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_permit_activity
+    source_bronze_table: timescale_permitactivity
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: pass_through
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: Name
+        target: PermitActivityName
+        transform: TRIM
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_progress_data_group
+    source_bronze_table: timescale_progressdatagroup
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: fk_validation
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+    columns:
+      - source: Id
+        target: ProgressDataGroupId
+      - source: ProjectId
+        target: ProjectId
+      - source: Code
+        target: Code
+        transform: TRIM
+      - source: Name
+        target: Name
+        transform: TRIM
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_progress_delay_reason
+    source_bronze_table: timescale_progressdelayreason
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+    columns:
+      - source: Id
+        target: ProgressDelayReasonId
+      - source: ProjectId
+        target: ProjectId
+      - source: Code
+        target: Code
+        transform: TRIM
+      - source: Name
+        target: Name
+        transform: TRIM
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_work_permit
+    source_bronze_table: timescale_workpermit
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: fk_validation
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+    columns:
+      - source: Id
+        target: WorkPermitId
+      - source: ProjectId
+        target: ProjectId
+      - source: Description
+        target: Description
+        transform: TRIM
+      - source: Date
+        target: Date
+      - source: Status
+        target: Status
+      - source: Type
+        target: Type
+      - source: NumberOfWorkers
+        target: NumberOfWorkers
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_work_permit_activity
+    source_bronze_table: timescale_workpermitactivity
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: fk_validation
+    fk_validations:
+      - column: PermitId
+        references: silver_work_permit.WorkPermitId
+        type: left_join
+      - column: ActivityId
+        references: silver_activity.ActivityId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: WorkPermitActivityId
+      - source: PermitId
+        target: WorkPermitId
+      - source: ActivityId
+        target: ActivityId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_assigned_workshift_attendance_scope
+    source_bronze_table: timescale_assignedworkshiftattendancescope
+    primary_key_columns: [Id]
+    processing_group: assignments
+    transformation_type: fk_validation
+    fk_validations:
+      - column: ResourceId
+        references: silver_worker.WorkerId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: ResourceId
+        target: WorkerId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  # ===========================================
+  # FACT TABLES
+  # ===========================================
+
+  - name: silver_fact_workers_history
+    source_bronze_table: timescale_devicelocation
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    comment: "Large table - 82M rows"
+    batch_size: 1000000
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+      - column: DeviceId
+        references: silver_device.DeviceId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: DeviceLocationId
+      - source: GeneratedAt
+        target: GeneratedAt
+      - source: ProjectId
+        target: ProjectId
+      - source: DeviceId
+        target: DeviceId
+      - source: SpaceId
+        target: FloorId
+      - source: DeviceType
+        target: DeviceType
+      - source: ActiveSequance
+        target: ActiveSequence
+      - source: InactiveSequance
+        target: InactiveSequence
+      - source: ActiveTime
+        target: ActiveTime
+      - source: InActiveTime
+        target: InactiveTime
+      - source: IsActive
+        target: IsActive
+      - source: Battery
+        target: Battery
+      - source: PointWKT
+        target: PointWKT
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_device_location_summary
+    source_bronze_table: timescale_devicelocationsummary
+    primary_key_columns: [Day, DeviceId, ProjectId]
+    processing_group: facts
+    transformation_type: fact_transform
+    comment: "Daily aggregates - 848K rows"
+    batch_size: 500000
+    has_geometry: true
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+      - column: DeviceId
+        references: silver_device.DeviceId
+        type: left_join
+    expectations:
+      critical:
+        - "Day IS NOT NULL"
+        - "ProjectId IS NOT NULL"
+        - "DeviceId IS NOT NULL"
+    columns:
+      - source: Day
+        target: Day
+      - source: GeneratedAt
+        target: GeneratedAt
+      - source: ProjectId
+        target: ProjectId
+      - source: DeviceId
+        target: DeviceId
+      - source: TotalActiveTime
+        target: TotalActiveTime
+      - source: TotalInActiveTime
+        target: TotalInactiveTime
+
+  - name: silver_fact_equipment_telemetry
+    source_bronze_table: timescale_equipmenttelemetry
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    batch_size: 500000
+    fk_validations:
+      - column: EquipmentId
+        references: silver_equipment.EquipmentId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "EquipmentId IS NOT NULL"
+    columns:
+      - source: Id
+        target: EquipmentTelemetryId
+      - source: EquipmentId
+        target: EquipmentId
+      - source: Speed
+        target: Speed
+      - source: Odometer
+        target: Odometer
+      - source: CreatedAt
+        target: CreatedAt
+
+  - name: silver_fact_resource_hours
+    source_bronze_table: timescale_resourcehours
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    fk_validations:
+      - column: PeopleId
+        references: silver_worker.WorkerId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "PeopleId IS NOT NULL"
+    columns:
+      - source: Id
+        target: ResourceHoursId
+      - source: PeopleId
+        target: WorkerId
+      - source: Date
+        target: Date
+      - source: TotalHours
+        target: TotalHours
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_resource_timesheet
+    source_bronze_table: timescale_resourcetimesheet
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    fk_validations:
+      - column: ResourceId
+        references: silver_worker.WorkerId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ResourceId IS NOT NULL"
+    columns:
+      - source: Id
+        target: Id
+      - source: ProjectId
+        target: ProjectId
+      - source: ResourceId
+        target: WorkerId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_resource_zone
+    source_bronze_table: timescale_resourcezone
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    batch_size: 500000
+    fk_validations:
+      - column: ReourceId
+        references: silver_worker.WorkerId
+        type: left_join
+      - column: ZoneId
+        references: silver_zone.ZoneId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ReourceId IS NOT NULL"
+        - "ZoneId IS NOT NULL"
+    columns:
+      - source: Id
+        target: ResourceZoneId
+      - source: ProjectId
+        target: ProjectId
+      - source: ReourceId
+        target: WorkerId
+      - source: ZoneId
+        target: ZoneId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_resource_attendance
+    source_bronze_table: timescale_resourceattendance
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    fk_validations:
+      - column: PeopleId
+        references: silver_worker.WorkerId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "PeopleId IS NOT NULL"
+    columns:
+      - source: Id
+        target: ResourceAttendanceId
+      - source: PeopleId
+        target: WorkerId
+      - source: Date
+        target: Date
+      - source: Remarks
+        target: Remarks
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_resource_approved_hours
+    source_bronze_table: timescale_resourceapprovedhour
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    fk_validations:
+      - column: ResourceId
+        references: silver_worker.WorkerId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ResourceId IS NOT NULL"
+    columns:
+      - source: Id
+        target: ResourceApprovedHoursId
+      - source: ProjectId
+        target: ProjectId
+      - source: ResourceId
+        target: WorkerId
+      - source: Date
+        target: Date
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_resource_hours_segment
+    source_bronze_table: timescale_resourceapprovedhourssegment
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: ResourceHoursSegmentId
+      - source: ProjectId
+        target: ProjectId
+      - source: ApprovalId
+        target: ApprovalId
+      - source: DataGroupId
+        target: DataGroupId
+      - source: ApprovedHours
+        target: ApprovedHours
+      - source: OverTimeHours
+        target: OverTimeHours
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_attendance_consolidated
+    source_bronze_table: timescale_attendancereportconsalidatedday
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    comment: "Consolidated attendance - 85K rows. No ProjectId - linked via PeopleCode"
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: AttendanceConsolidatedId
+      - source: PeopleCode
+        target: PeopleCode
+        transform: TRIM
+      - source: Day
+        target: Day
+      - source: SGSAttendanceInTime
+        target: SGSAttendanceInTime
+      - source: CalculatedAttendanceInTime
+        target: CalculatedAttendanceInTime
+      - source: SGSAttendanceOutTime
+        target: SGSAttendanceOutTime
+      - source: CalculatedAttendanceOutTime
+        target: CalculatedAttendanceOutTime
+      - source: Workshift
+        target: Workshift
+      - source: StartHour
+        target: StartHour
+      - source: EndHour
+        target: EndHour
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_co2_inspection
+    source_bronze_table: timescale_co2inspection
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    comment: "CO2/emissions inspection data - linked via EquipmentId"
+    fk_validations:
+      - column: EquipmentId
+        references: silver_equipment.EquipmentId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: Co2InspectionId
+      - source: EquipmentId
+        target: EquipmentId
+      - source: FuelType
+        target: FuelType
+      - source: ActiveCo2EmissionKg
+        target: ActiveCo2EmissionKg
+      - source: ActiveFuelUsedLitres
+        target: ActiveFuelUsedLitres
+      - source: ActiveHours
+        target: ActiveHours
+      - source: IdleCo2EmissionKg
+        target: IdleCo2EmissionKg
+      - source: IdleFuelUsedLitres
+        target: IdleFuelUsedLitres
+      - source: IdleHours
+        target: IdleHours
+      - source: TotalEngineHours
+        target: TotalEngineHours
+      - source: CreatedBy
+        target: CreatedBy
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_inspection
+    source_bronze_table: timescale_inspection
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    comment: "Equipment inspections - no ProjectId, linked via EquipmentId"
+    fk_validations:
+      - column: EquipmentId
+        references: silver_equipment.EquipmentId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: InspectionId
+      - source: EquipmentId
+        target: EquipmentId
+      - source: Description
+        target: Description
+      - source: InspectionCreation
+        target: InspectionCreation
+      - source: InspectionExpiration
+        target: InspectionExpiration
+      - source: CreatedBy
+        target: CreatedBy
+      - source: DeletedAt
+        target: DeletedAt
+      - source: CreatedAt
+        target: CreatedAt
+
+  - name: silver_fact_plan
+    source_bronze_table: timescale_plan
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+    columns:
+      - source: Id
+        target: PlanId
+      - source: ProjectId
+        target: ProjectId
+      - source: CalendarPeriodId
+        target: CalendarPeriodId
+      - source: ActivityId
+        target: ActivityId
+      - source: WorkOrderNumber
+        target: WorkOrderNumber
+      - source: TargetQuantity
+        target: TargetQuantity
+      - source: TargetPercentage
+        target: TargetPercentage
+      - source: PlannedQuantity
+        target: PlannedQuantity
+      - source: PlannedPercentage
+        target: PlannedPercentage
+      - source: ActualQuantity
+        target: ActualQuantity
+      - source: ActualPercentage
+        target: ActualPercentage
+      - source: Open
+        target: Open
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_plan_progress
+    source_bronze_table: timescale_planprogress
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    fk_validations:
+      - column: PlanId
+        references: silver_fact_plan.PlanId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "PlanId IS NOT NULL"
+    columns:
+      - source: Id
+        target: PlanProgressId
+      - source: PlanId
+        target: PlanId
+      - source: Date
+        target: Date
+      - source: ActualQuantity
+        target: ActualQuantity
+      - source: ActualPercentage
+        target: ActualPercentage
+      - source: Remarks
+        target: Remarks
+      - source: ActionTime
+        target: ActionTime
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_plan_progress_delay
+    source_bronze_table: timescale_planprogressdelayreason
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    fk_validations:
+      - column: PlanId
+        references: silver_fact_plan.PlanId
+        type: left_join
+      - column: ProgressDelayReasonId
+        references: silver_progress_delay_reason.ProgressDelayReasonId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: PlanProgressDelayId
+      - source: PlanId
+        target: PlanId
+      - source: ProgressDelayReasonId
+        target: ProgressDelayReasonId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_plan_progress_resource
+    source_bronze_table: timescale_planprogressresource
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    fk_validations:
+      - column: PlanProgressId
+        references: silver_fact_plan_progress.PlanProgressId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: PlanProgressResourceId
+      - source: PlanProgressId
+        target: PlanProgressId
+      - source: ResourceId
+        target: ResourceId
+      - source: DeletedAt
+        target: DeletedAt
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_sgs_attendance
+    source_bronze_table: timescale_sgsattendancelog
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    comment: "SGS attendance logs - no ProjectId, linked via ResourceId"
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: SgsAttendanceId
+      - source: ResourceId
+        target: ResourceId
+      - source: Day
+        target: Day
+      - source: Attendance
+        target: Attendance
+      - source: AttendanceTime
+        target: AttendanceTime
+      - source: Confirmed
+        target: Confirmed
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_sgs_roster
+    source_bronze_table: timescale_sgsrosterworkshiftlog
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    comment: "Large table - 68M rows. No ProjectId - linked via PeopleCode"
+    batch_size: 1000000
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: SgsRosterId
+      - source: PeopleCode
+        target: PeopleCode
+        transform: TRIM
+      - source: Date
+        target: Date
+      - source: Workshift
+        target: Workshift
+        transform: TRIM
+      - source: StartHour
+        target: StartHour
+      - source: EndHour
+        target: EndHour
+      - source: BatchId
+        target: BatchId
+      - source: IsValidRow
+        target: IsValidRow
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_fact_workshifts_cache
+    source_bronze_table: timescale_viewfactworkshiftscache
+    primary_key_columns: [ExtWorkerID, ShiftLocalDate, ProjectId]
+    processing_group: facts
+    transformation_type: fact_transform
+    comment: "Pre-aggregated workshift cache"
+    batch_size: 500000
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "ProjectId IS NOT NULL"
+        - "ShiftLocalDate IS NOT NULL"
+    columns:
+      - source: ProjectId
+        target: ProjectId
+      - source: ExtWorkerID
+        target: ExtWorkerId
+      - source: ShiftLocalDate
+        target: ShiftLocalDate
+      - source: ActiveHours
+        target: ActiveHours
+      - source: InactiveHours
+        target: InactiveHours
+      - source: StartAt
+        target: StartAt
+      - source: FinishAt
+        target: FinishAt
+      - source: WatermarkUTC
+        target: WatermarkUTC
+
+  - name: silver_fact_novade_work_permit
+    source_bronze_table: timescale_novadeworkpermit
+    primary_key_columns: [Id]
+    processing_group: facts
+    transformation_type: fact_transform
+    has_geometry: false
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+    columns:
+      - source: Id
+        target: NovadeWorkPermitId
+      - source: ProjectId
+        target: ProjectId
+      - source: ExternalPermitId
+        target: ExternalPermitId
+        transform: TRIM
+      - source: Name
+        target: PermitName
+        transform: TRIM
+      - source: PermitType
+        target: PermitType
+      - source: Status
+        target: Status
+      - source: StartDate
+        target: StartDate
+      - source: EndDate
+        target: EndDate
+      - source: ZoneId
+        target: ZoneId
+      - source: SpaceId
+        target: SpaceId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  # ===========================================
+  # HISTORY TABLES
+  # ===========================================
+
+  - name: silver_history_space
+    source_bronze_table: timescale_spacehistory
+    primary_key_columns: [Id]
+    processing_group: history
+    transformation_type: history_audit
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: SpaceHistoryId
+      - source: Name
+        target: FloorName
+        transform: TRIM
+      - source: UserId
+        target: UserId
+      - source: Action
+        target: Action
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_history_zone
+    source_bronze_table: timescale_zonehistory
+    primary_key_columns: [Id]
+    processing_group: history
+    transformation_type: history_audit
+    fk_validations:
+      - column: ZoneId
+        references: silver_zone.ZoneId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: ZoneHistoryId
+      - source: ZoneId
+        target: ZoneId
+      - source: Name
+        target: ZoneName
+        transform: TRIM
+      - source: UserId
+        target: UserId
+      - source: Action
+        target: Action
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+
+  - name: silver_history_zone_violation
+    source_bronze_table: timescale_zoneviolationlog
+    primary_key_columns: [Id]
+    processing_group: history
+    transformation_type: history_audit
+    fk_validations:
+      - column: ZoneId
+        references: silver_zone.ZoneId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+    columns:
+      - source: Id
+        target: ZoneViolationLogId
+      - source: ProjectId
+        target: ProjectId
+      - source: ZoneId
+        target: ZoneId
+      - source: Type
+        target: ViolationType
+      - source: BatchId
+        target: BatchId
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt

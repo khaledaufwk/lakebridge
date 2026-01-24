@@ -1,7 +1,7 @@
 # WakeCapDW Migration Status Report
 
 **Generated:** 2026-01-19
-**Last Updated:** 2026-01-22
+**Last Updated:** 2026-01-24
 **Source:** TimescaleDB (wakecap_app) + WakeCapDW_20251215 (Azure SQL Server)
 **Target:** Databricks Unity Catalog (wakecap_prod)
 
@@ -19,6 +19,7 @@
 | Functions | 23/23 (100%) |
 | Pipeline Status | Deployed (Development Mode) |
 | **Bronze Layer (TimescaleDB)** | **78 tables LOADED** |
+| **Silver Layer** | **DEPLOYED (77 tables)** |
 
 ---
 
@@ -33,7 +34,7 @@
 | 5. Deployment | COMPLETE | 100% |
 | 6. ADF Extraction to ADLS | READY | 100% (artifacts) |
 | 7. Data Ingestion (Bronze) | **COMPLETE** | **100%** |
-| 8. Data Transformation (Silver) | CONVERTED | 100% |
+| 8. Data Transformation (Silver) | **DEPLOYED** | **100%** |
 | 9. Business Layer (Gold) | CONVERTED | 100% |
 | 10. Stored Procedure Conversion | COMPLETE | 100% |
 | 11. Function Conversion | COMPLETE | 100% |
@@ -149,6 +150,112 @@ These tables exist in SQL Server stg schema but are NOT in the Databricks Bronze
 | stg.wc2023_WorkshiftResourceAssignment_full | Full refresh variant |
 
 **Note:** Many `_full` suffix tables are full-refresh staging variants and may not need separate migration. The `observation_*` tables may need to be sourced from TimescaleDB or SQL Server directly.
+
+---
+
+## Silver Layer Status (2026-01-24) - DEPLOYED
+
+### Silver Layer Pipeline
+
+The Silver layer transformation pipeline has been **DEPLOYED** as a standalone Databricks Job.
+
+| Metric | Value |
+|--------|-------|
+| **Source Schema** | wakecap_prod.raw (Bronze) |
+| **Target Schema** | wakecap_prod.silver |
+| **Total Silver Tables** | 77 |
+| **Job Name** | WakeCapDW_Silver_TimescaleDB |
+| **Job ID** | 181959206191493 |
+| **Schedule** | Daily 3:00 AM UTC (Paused) |
+| **Load Method** | Watermark-based incremental from Bronze `_loaded_at` |
+
+### Job Structure (8 Tasks with Dependencies)
+
+```
+silver_independent_dimensions ----+
+                                  +--> silver_project_children --> silver_zone_dependent --+--> silver_assignments --> silver_facts
+silver_organization --> silver_project --+                                                  |
+                                                                                            +--> silver_history
+```
+
+| Task | Tables | Cluster |
+|------|--------|---------|
+| silver_independent_dimensions | 11 | 2 workers |
+| silver_organization | 2 | 2 workers |
+| silver_project | 1 | 2 workers |
+| silver_project_children | 16 | 2 workers |
+| silver_zone_dependent | 7 | 2 workers |
+| silver_assignments | 17 | 2 workers |
+| silver_facts | 20 | 4 workers (larger) |
+| silver_history | 3 | 2 workers |
+
+### Processing Groups
+
+| Group | Order | Tables | Description |
+|-------|-------|--------|-------------|
+| independent_dimensions | 1 | 11 | Standalone lookup tables (no FK dependencies) |
+| organization | 2 | 2 | Organization and Device tables |
+| project_dependent | 3 | 1 | Project table (depends on organization) |
+| project_children | 4 | 16 | Worker, Crew, Floor, Zone, etc. |
+| zone_dependent | 5 | 7 | Tables depending on floor/zone hierarchy |
+| assignments | 6 | 17 | Bridge/association tables with FK validation |
+| facts | 7 | 20 | Fact tables including 82M DeviceLocation |
+| history | 8 | 3 | Audit/history tables |
+
+### Data Quality Validation (3-Tier)
+
+| Tier | Action | Example |
+|------|--------|---------|
+| **Critical** | Drop failing rows | `Id IS NOT NULL`, `Name IS NOT NULL` |
+| **Business** | Log violation, keep row | `ProjectId IS NOT NULL`, `DeletedAt IS NULL` |
+| **Advisory** | Warn only | `Latitude BETWEEN -90 AND 90` |
+
+### Key Table Mappings
+
+| Bronze Table | Silver Table | Transformation |
+|--------------|--------------|----------------|
+| timescale_company (org type) | silver_organization | Filter Type='organization' |
+| timescale_company (project type) | silver_project | Filter Type='project' |
+| timescale_people | silver_worker | Key mapping: People = Worker |
+| timescale_space | silver_floor | Key mapping: Space = Floor |
+| timescale_avldevice | silver_device | Key mapping: AvlDevice = Device |
+| timescale_devicelocation | silver_fact_workers_history | 82M rows, composite PK |
+| timescale_sgsrosterworkshiftlog | silver_fact_sgs_roster | 68M rows |
+
+### Silver Layer Files
+
+| File | Path | Purpose |
+|------|------|---------|
+| Notebook | `/Workspace/migration_project/pipelines/silver/notebooks/silver_loader` | Main transformation notebook |
+| Registry | `/Workspace/migration_project/pipelines/silver/config/silver_tables.yml` | 77 table definitions |
+| DDL | `/Workspace/migration_project/pipelines/silver/ddl/create_silver_watermarks.sql` | Watermark table DDL |
+| Deploy Script | `migration_project/deploy_silver_layer.py` | Deployment automation |
+
+### Watermark Tracking
+
+**Table:** `wakecap_prod.migration._silver_watermarks`
+
+| Column | Description |
+|--------|-------------|
+| table_name | Silver table name |
+| source_bronze_table | Source Bronze table |
+| processing_group | Dependency group |
+| last_bronze_watermark | Max `_loaded_at` from Bronze |
+| last_load_status | success/failed/skipped |
+| rows_input | Rows read from Bronze |
+| rows_dropped_critical | Rows dropped by critical DQ |
+| rows_flagged_business | Rows flagged by business DQ |
+| rows_warned_advisory | Rows warned by advisory DQ |
+
+### Next Steps for Silver Layer
+
+1. **Run Initial Load**: Go to job URL and click "Run now"
+2. **Enable Schedule**: After success, unpause the 3:00 AM UTC schedule
+3. **Monitor**: Check `_silver_watermarks` table for load status
+
+**Job URL:** https://adb-3022397433351638.18.azuredatabricks.net/jobs/181959206191493
+
+---
 
 ### Excluded Tables (5)
 
@@ -437,10 +544,11 @@ migration_project/pipelines/
 
 1. ~~**Execute ADF Deployment**~~ - Not needed for TimescaleDB source
 2. ~~**Run ADF Full Extract**~~ - Replaced by TimescaleDB JDBC loading
-3. **Deploy Silver Layer** - Run DLT pipeline for Silver transformations
-4. **Deploy Gold Layer** - Run DLT pipeline for Gold views
-5. **Run Validation** - Execute `validation_reconciliation.py` for data reconciliation
-6. **Load SQL Server-only tables** - Consider loading observation_*, organization, Project tables
+3. ~~**Deploy Silver Layer**~~ - **DEPLOYED** (Job ID: 181959206191493)
+4. **Run Silver Initial Load** - Execute job manually for backfill
+5. **Deploy Gold Layer** - Run DLT pipeline for Gold views
+6. **Run Validation** - Execute `validation_reconciliation.py` for data reconciliation
+7. **Load SQL Server-only tables** - Consider loading observation_*, organization, Project tables
 
 ---
 
@@ -459,7 +567,11 @@ migration_project/pipelines/
 | **TimescaleDB** | `pipelines/timescaledb/notebooks/bronze_loader_*.py` | **DEPLOYED** |
 | **TimescaleDB** | `pipelines/timescaledb/config/timescaledb_tables_v2.yml` | **DEPLOYED** |
 | **TimescaleDB** | `pipelines/timescaledb/src/timescaledb_loader_v2.py` | **DEPLOYED** |
+| **Silver** | `pipelines/silver/notebooks/silver_loader.py` | **DEPLOYED** |
+| **Silver** | `pipelines/silver/config/silver_tables.yml` | **DEPLOYED** |
+| **Silver** | `pipelines/silver/ddl/create_silver_watermarks.sql` | **DEPLOYED** |
+| **Silver** | `deploy_silver_layer.py` | **READY** |
 
 ---
 
-*Status updated: 2026-01-22 - Bronze layer initial load from TimescaleDB COMPLETE. 78 tables loaded to wakecap_prod.raw. Ready for Silver/Gold layer deployment.*
+*Status updated: 2026-01-24 - Silver layer DEPLOYED. Job ID: 181959206191493. 77 tables configured with 8-task dependency chain. Ready for initial load execution.*

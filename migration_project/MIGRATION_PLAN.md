@@ -1,7 +1,7 @@
 # WakeCapDW Migration Plan
 
 **Created:** 2026-01-18
-**Last Updated:** 2026-01-22
+**Last Updated:** 2026-01-24
 
 ---
 
@@ -225,7 +225,72 @@ ALTER TABLE wakecap_prod.raw.timescale_devicelocationsummary SET TBLPROPERTIES (
 
 **Note:** TimescaleDB compression was evaluated but not implemented as it has adverse effects on source database performance.
 
-### 1.6 Table Registry
+### 1.6 Append-Only Mode Optimization
+
+**Added:** 2026-01-24
+
+For tables that are insert-only (no updates or deletes), the loader uses APPEND mode instead of MERGE, providing significant performance improvements.
+
+#### 1.6.1 How to Identify Append-Only Tables
+
+Tables are candidates for append-only mode when:
+
+| Pattern | Description | Example |
+|---------|-------------|---------|
+| **Hypertables** | TimescaleDB partitioned tables designed for time-series inserts | DeviceLocation, EquipmentTelemetry |
+| **CreatedAt-only watermark** | Tables using only `CreatedAt` (no UpdatedAt in GREATEST expression) | Inspection |
+| **Log/telemetry tables** | Tables that only record events, never update them | ZoneViolationLog |
+| **Cache tables** | Pre-computed tables that are refreshed by insert | ViewFactWorkshiftsCache |
+
+#### 1.6.2 Current Append-Only Tables
+
+| Table | Rows | Reason | Performance Gain |
+|-------|------|--------|------------------|
+| DeviceLocation | 85M | Hypertable, insert-only telemetry | ~4x faster (MERGE skipped) |
+| DeviceLocationSummary | 7M | Hypertable, daily aggregation inserts | ~3x faster |
+| EquipmentTelemetry | 0.8M | Hypertable, telemetry inserts only | ~3x faster |
+| Inspection | ~50K | Uses only CreatedAt watermark | ~2x faster |
+| ViewFactWorkshiftsCache | ~2M | Hypertable, cache refresh by insert | ~3x faster |
+
+#### 1.6.3 Configuration
+
+In `timescaledb_tables_v2.yml`:
+
+```yaml
+# Append-only table example
+- source_table: DeviceLocation
+  primary_key_columns: [DeviceId, ProjectId, ActiveSequance, InactiveSequance, GeneratedAt]
+  watermark_column: GeneratedAt
+  category: facts
+  is_hypertable: true
+  is_append_only: true  # CRITICAL: Skip MERGE, use APPEND mode
+  comment: "Large hypertable - append-only (no updates)"
+```
+
+#### 1.6.4 Implementation Details
+
+The loader detects `is_append_only: true` and uses direct APPEND instead of MERGE:
+
+```python
+# In timescaledb_loader_v2.py
+if table_config.is_append_only:
+    # Use APPEND mode - skip expensive MERGE operation
+    df.write.format("delta").mode("append").saveAsTable(target_table)
+else:
+    # Standard MERGE for tables with updates
+    delta_table.merge(df, merge_condition)
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute()
+```
+
+**Why This Matters:**
+- MERGE operations require comparing every incoming row against the entire target table
+- For large tables like DeviceLocation (85M rows), this comparison is very expensive
+- APPEND mode simply adds new rows without comparison
+- DeviceLocation load time reduced from ~107 minutes to ~25-30 minutes
+
+### 1.7 Table Registry
 
 **Registry File:** `pipelines/timescaledb/config/timescaledb_tables_v2.yml`
 
@@ -264,7 +329,7 @@ ALTER TABLE wakecap_prod.raw.timescale_devicelocationsummary SET TBLPROPERTIES (
   category: facts
 ```
 
-### 1.7 Delta Write Strategy
+### 1.8 Delta Write Strategy
 
 #### MERGE Operation for Upserts
 
@@ -298,7 +363,7 @@ ALTER TABLE {target_table} SET TBLPROPERTIES (
 )
 ```
 
-### 1.8 Metadata Columns
+### 1.9 Metadata Columns
 
 Every bronze table includes:
 
@@ -311,7 +376,7 @@ Every bronze table includes:
 | `_pipeline_id` | Notebook path | Pipeline identifier |
 | `_pipeline_run_id` | Run ID | Unique run identifier |
 
-### 1.9 Notebook Parameters
+### 1.10 Notebook Parameters
 
 The bronze loader notebook accepts these parameters:
 
@@ -323,7 +388,7 @@ The bronze loader notebook accepts these parameters:
 | `fetch_size` | numeric | 50000 | JDBC fetch size |
 | `max_tables` | numeric | 0 (all) | Limit tables to load |
 
-### 1.10 Running the Bronze Job
+### 1.11 Running the Bronze Job
 
 #### Via Databricks UI
 
@@ -358,7 +423,7 @@ python run_bronze_all.py
 python monitor_pipeline.py --job-name "WakeCapDW_Bronze_TimescaleDB_Raw"
 ```
 
-### 1.11 Monitoring & Verification
+### 1.12 Monitoring & Verification
 
 #### Check Watermarks
 
@@ -404,7 +469,7 @@ WHERE last_load_status = 'failed'
 ORDER BY last_load_end_time DESC;
 ```
 
-### 1.12 Error Handling & Recovery
+### 1.13 Error Handling & Recovery
 
 #### Automatic Retry
 
@@ -422,9 +487,9 @@ loader.load_table(table_config, force_full_load=True)
 # Set load_mode = "full" and run specific category
 ```
 
-### 1.13 Additional TimescaleDB Databases
+### 1.14 Additional TimescaleDB Databases
 
-#### 1.13.1 Observation Database (wakecap_observation)
+#### 1.14.1 Observation Database (wakecap_observation)
 
 **Status:** READY FOR DEPLOYMENT (2026-01-22)
 
@@ -457,7 +522,7 @@ The `wakecap_observation` database contains safety observation and incident trac
 python deploy_observation_pipeline.py
 ```
 
-#### 1.13.2 Weather Station Database (weather-station)
+#### 1.14.2 Weather Station Database (weather-station)
 
 **Status:** READY FOR DEPLOYMENT (2026-01-22)
 
@@ -485,7 +550,7 @@ The `weather-station` database contains weather monitoring configuration and thr
 | Report | 1 | Id | UpdatedAt | Report configurations |
 | CalculatedStatistics | 0 | Id | UpdatedAt | Calculated stats (empty) |
 
-#### 1.13.3 Combined Deployment
+#### 1.14.3 Combined Deployment
 
 **Deploy both new databases:**
 ```bash
@@ -663,27 +728,162 @@ These functions implement row-level security. Conversion approach:
 
 ## Phase 4: Silver Layer Implementation
 
-### 4.1 Data Quality Rules
+### Status: DEPLOYED (2026-01-24)
 
-Add data quality expectations to Silver layer tables:
+The Silver layer has been deployed as a standalone Databricks Job with 77 tables organized into 8 processing groups.
 
-```python
-@dlt.expect_or_drop("valid_worker_id", "worker_id IS NOT NULL")
-@dlt.expect_or_drop("valid_dates", "start_date <= end_date")
-@dlt.expect("non_negative_value", "value >= 0")
+| Metric | Value |
+|--------|-------|
+| **Job Name** | WakeCapDW_Silver_TimescaleDB |
+| **Job ID** | 181959206191493 |
+| **Target Schema** | wakecap_prod.silver |
+| **Total Tables** | 77 |
+| **Schedule** | Daily 3:00 AM UTC (Paused) |
+| **Job URL** | https://adb-3022397433351638.18.azuredatabricks.net/jobs/181959206191493 |
+
+### 4.1 Architecture
+
+```
+Bronze (wakecap_prod.raw)                    Silver (wakecap_prod.silver)
+     |                                              |
+     | Watermark-based incremental                  |
+     | (_loaded_at column)                          |
+     v                                              v
++------------------+     +-----------------+     +------------------+
+| timescale_*      | --> | silver_loader   | --> | silver_*         |
+| (78 tables)      |     | notebook        |     | (77 tables)      |
++------------------+     +-----------------+     +------------------+
+                                |
+                                v
+                         +------------------+
+                         | _silver_watermarks|
+                         | (tracking table)  |
+                         +------------------+
 ```
 
-### 4.2 Silver Tables to Create
+### 4.2 Job Structure (8 Tasks with Dependencies)
 
-| Table | Source | Transformations |
-|-------|--------|-----------------|
-| silver_Worker | timescale_people | Dedupe, clean names, validate IDs |
-| silver_Project | timescale_* | Validate status, clean names |
-| silver_Crew | timescale_crew | Validate references |
-| silver_Device | timescale_* | Validate model references |
-| silver_Organization | timescale_company | Hierarchy validation |
-| silver_FactObservations | timescale_* | Date validation, deduplication |
-| silver_FactWorkersShifts | timescale_workshift* | Time calculations, validation |
+```
+silver_independent_dimensions ----+
+                                  +--> silver_project_children --> silver_zone_dependent --+--> silver_assignments --> silver_facts
+silver_organization --> silver_project --+                                                  |
+                                                                                            +--> silver_history
+```
+
+| Task | Processing Group | Tables | Cluster |
+|------|------------------|--------|---------|
+| silver_independent_dimensions | independent_dimensions | 11 | 2 workers |
+| silver_organization | organization | 2 | 2 workers |
+| silver_project | project_dependent | 1 | 2 workers |
+| silver_project_children | project_children | 16 | 2 workers |
+| silver_zone_dependent | zone_dependent | 7 | 2 workers |
+| silver_assignments | assignments | 17 | 2 workers |
+| silver_facts | facts | 20 | 4 workers |
+| silver_history | history | 3 | 2 workers |
+
+### 4.3 Data Quality Rules (3-Tier Validation)
+
+The Silver layer implements 3-tier data quality validation:
+
+| Tier | Action | Use Case |
+|------|--------|----------|
+| **Critical** | Drop failing rows | Primary key NOT NULL, required fields |
+| **Business** | Log violation, keep row | FK references, soft-delete checks |
+| **Advisory** | Warn only | Range validation, format checks |
+
+Example expectations:
+```python
+expectations = {
+    'critical': [
+        "Id IS NOT NULL",
+        "Name IS NOT NULL AND LENGTH(TRIM(Name)) > 0"
+    ],
+    'business': [
+        "ProjectId IS NOT NULL",
+        "DeletedAt IS NULL"
+    ],
+    'advisory': [
+        "Latitude BETWEEN -90 AND 90 OR Latitude IS NULL"
+    ]
+}
+```
+
+### 4.4 Silver Tables (77 Total)
+
+| Category | Count | Examples |
+|----------|-------|----------|
+| Independent Dimensions | 11 | company_type, crew_type, nationality, discipline |
+| Organization | 2 | silver_organization, silver_device |
+| Project | 1 | silver_project |
+| Project Children | 16 | silver_worker, silver_crew, silver_floor, silver_zone |
+| Zone Dependent | 7 | silver_workshift_day, silver_crew_composition |
+| Assignments | 17 | silver_resource_device, silver_certificate |
+| Facts | 20 | silver_fact_workers_history (82M), silver_fact_sgs_roster (68M) |
+| History | 3 | silver_history_space, silver_history_zone |
+
+### 4.5 Key Table Mappings
+
+| Bronze Table | Silver Table | Transformation |
+|--------------|--------------|----------------|
+| timescale_company | silver_organization | Filter `Type='organization'` |
+| timescale_company | silver_project | Filter `Type='project'` |
+| timescale_people | silver_worker | Key mapping: People = Worker |
+| timescale_space | silver_floor | Key mapping: Space = Floor |
+| timescale_avldevice | silver_device | Key mapping: AvlDevice = Device |
+| timescale_devicelocation | silver_fact_workers_history | 82M rows, composite PK |
+
+### 4.6 Watermark Tracking
+
+**Table:** `wakecap_prod.migration._silver_watermarks`
+
+```sql
+SELECT table_name, processing_group, last_load_status,
+       last_load_row_count, rows_dropped_critical,
+       rows_flagged_business, last_bronze_watermark
+FROM wakecap_prod.migration._silver_watermarks
+ORDER BY processing_group, table_name;
+```
+
+### 4.7 Running the Silver Job
+
+**Initial Load (Manual):**
+1. Go to: https://adb-3022397433351638.18.azuredatabricks.net/jobs/181959206191493
+2. Click "Run now"
+3. Monitor 8 tasks in dependency order
+
+**Enable Schedule:**
+After successful initial load, change schedule from "Paused" to "Active" (3:00 AM UTC)
+
+### 4.8 Verification Queries
+
+```sql
+-- Check Silver tables created
+SHOW TABLES IN wakecap_prod.silver;
+
+-- Row count reconciliation
+SELECT 'bronze' as layer, COUNT(*) as cnt
+FROM wakecap_prod.raw.timescale_company
+WHERE "DeletedAt" IS NULL
+UNION ALL
+SELECT 'silver_org' as layer, COUNT(*) as cnt
+FROM wakecap_prod.silver.silver_organization;
+
+-- FK integrity check
+SELECT COUNT(*) AS orphaned_projects
+FROM wakecap_prod.silver.silver_project p
+LEFT JOIN wakecap_prod.silver.silver_organization o
+  ON p.OrganizationId = o.OrganizationId
+WHERE p.OrganizationId IS NOT NULL
+  AND o.OrganizationId IS NULL;
+```
+
+### 4.9 Files Deployed
+
+| File | Workspace Path |
+|------|----------------|
+| Notebook | `/Workspace/migration_project/pipelines/silver/notebooks/silver_loader` |
+| Config | `/Workspace/migration_project/pipelines/silver/config/silver_tables.yml` |
+| DDL | `/Workspace/migration_project/pipelines/silver/ddl/create_silver_watermarks.sql` |
 
 ---
 
@@ -747,7 +947,8 @@ Compare key aggregations:
 - [x] Watermark tracking operational (_timescaledb_watermarks table)
 - [x] Geometry handling working (9 tables with ST_AsText conversion)
 - [x] **DeviceLocation optimization complete (correct PKs, GeneratedAt watermark, Z-ORDER)**
-- [ ] Silver layer transformations complete
+- [x] **Silver layer DEPLOYED (Job ID: 181959206191493, 77 tables)**
+- [ ] Silver layer initial load executed
 - [ ] Gold layer views working
 - [ ] Critical stored procedures converted
 - [ ] Row counts validated against source
@@ -759,10 +960,18 @@ Compare key aggregations:
 
 | Job | Schedule | Description |
 |-----|----------|-------------|
-| WakeCapDW_Bronze_TimescaleDB_Raw | Daily 2:00 AM UTC | Incremental bronze load (all tables) |
+| WakeCapDW_Bronze_TimescaleDB_Raw | Daily 2:00 AM UTC | Incremental bronze load (78 tables) |
+| **WakeCapDW_Silver_TimescaleDB** | **Daily 3:00 AM UTC** | **Silver layer transformations (77 tables)** |
 | Bronze_DeviceLocation | On-demand / After main job | Dedicated loader for large DeviceLocation tables |
-| DLT Pipeline | Every 4 hours | Silver/Gold transformations |
+| DLT Pipeline (Gold) | Every 4 hours | Gold layer views |
 | Validation Job | Weekly | Data reconciliation |
+
+**Schedule Coordination:**
+```
+2:00 AM UTC - Bronze Job (TimescaleDB -> wakecap_prod.raw)
+3:00 AM UTC - Silver Job (Bronze -> wakecap_prod.silver)
+4:00 AM UTC - Gold Job (Silver -> wakecap_prod.gold) [Future]
+```
 
 **Note:** DeviceLocation tables are included in the main job but can also be run separately using `bronze_loader_devicelocation` notebook for:
 - Initial full loads
@@ -791,11 +1000,21 @@ Compare key aggregations:
 | `pipelines/timescaledb/config/timescaledb_tables_observation.yml` | **Table registry - wakecap_observation (6 tables)** |
 | `pipelines/timescaledb/config/timescaledb_tables_weather.yml` | **Table registry - weather-station (7 tables)** |
 
+### Silver Layer Files
+
+| File | Purpose |
+|------|---------|
+| `pipelines/silver/notebooks/silver_loader.py` | **Main Silver transformation notebook** |
+| `pipelines/silver/config/silver_tables.yml` | **77 table registry with DQ expectations** |
+| `pipelines/silver/ddl/create_silver_watermarks.sql` | **Watermark tracking DDL** |
+| `deploy_silver_layer.py` | **Silver layer deployment script** |
+
 ### Production Scripts
 
 | Script | Purpose |
 |--------|---------|
-| `deploy_new_databases.py` | **Deploy observation + weather loaders and update job** |
+| `deploy_new_databases.py` | Deploy observation + weather loaders and update job |
+| `deploy_silver_layer.py` | **Deploy Silver layer job and notebooks** |
 | `run_bronze_all.py` | Run all bronze tables |
 | `run_bronze_raw.py` | Run raw bronze |
 | `monitor_pipeline.py` | Monitor pipeline execution |
@@ -821,6 +1040,11 @@ Compare key aggregations:
 
 | Date | Update |
 |------|--------|
+| 2026-01-24 | **Append-only mode optimization** - Added `is_append_only` pattern for hypertables (5 tables: DeviceLocation, DeviceLocationSummary, EquipmentTelemetry, Inspection, ViewFactWorkshiftsCache) |
+| 2026-01-24 | **Silver layer DEPLOYED** - Job ID 181959206191493, 77 tables, 8 processing groups |
+| 2026-01-24 | Created silver_loader.py notebook (standalone, self-contained) |
+| 2026-01-24 | Created silver_tables.yml registry with 3-tier DQ expectations |
+| 2026-01-24 | Created deploy_silver_layer.py deployment script |
 | 2026-01-22 | **Added wakecap_observation database** - 6 tables (~8M rows), observation_* prefix |
 | 2026-01-22 | **Added weather-station database** - 7 tables (~115 rows), weather_* prefix |
 | 2026-01-22 | **Created unified deployment script** - deploy_new_databases.py for both new databases |

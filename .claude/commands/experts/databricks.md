@@ -242,6 +242,60 @@ config = yaml.safe_load(config_string)
 
 **Pre-installed packages:** Many common packages are already available in Databricks Runtime. Before adding `%pip install`, check if the package is already included in the runtime. See [Databricks Runtime release notes](https://docs.databricks.com/release-notes/runtime/releases.html) for the full list.
 
+## Critical: Azure VM Quota Exceeded When Creating Job Clusters
+
+**Problem:** Job clusters fail to start with `AZURE_QUOTA_EXCEEDED_EXCEPTION` when the Azure subscription doesn't have enough vCPU quota for the specified VM family. Error message:
+
+```
+AZURE_QUOTA_EXCEEDED_EXCEPTION (CLIENT_ERROR): The VM size you are specifying is not available.
+QuotaExceeded: Operation could not be completed as it results in exceeding approved
+standardDSv2Family Cores quota. Current Limit: 10, Current Usage: 8, Additional Required: 16
+```
+
+**Solution:** Use an existing all-purpose cluster instead of creating new job clusters:
+
+1. **Identify available cluster** with sufficient quota (e.g., DSv3 family instead of DSv2):
+   ```python
+   clusters = w.clusters.list()
+   for c in clusters:
+       print(f'{c.cluster_id}: {c.cluster_name} - {c.state}')
+   ```
+
+2. **Update job to use existing cluster** instead of `job_clusters`:
+   ```python
+   from databricks.sdk.service.jobs import JobSettings, Task, NotebookTask
+
+   # Use existing_cluster_id instead of job_cluster_key
+   w.jobs.update(
+       job_id=job_id,
+       new_settings=JobSettings(
+           name=job.settings.name,
+           tasks=[
+               Task(
+                   task_key="my_task",
+                   existing_cluster_id="0118-134705-lklfkwvh",  # Use existing cluster
+                   notebook_task=NotebookTask(
+                       notebook_path="/path/to/notebook"
+                   )
+               )
+           ],
+           job_clusters=None,  # Remove job clusters
+           schedule=job.settings.schedule
+       )
+   )
+   ```
+
+**Azure Quota by VM Family:**
+| Family | Common Types | Notes |
+|--------|-------------|-------|
+| DSv2 | Standard_DS3_v2, Standard_DS4_v2 | Often limited quota |
+| DSv3 | Standard_D4s_v3, Standard_D8s_v3 | Usually more quota available |
+| Dv5 | Standard_D4s_v5, Standard_D8s_v5 | Newer generation |
+
+**Best Practice:** Configure a dedicated all-purpose cluster for migration workloads (e.g., "Migrate Compute - Khaled Auf") using a VM family with sufficient quota (DSv3), then reference it in jobs via `existing_cluster_id`.
+
+---
+
 ## Cluster Access Modes
 
 | Mode | DBUtils(spark) Works? | Best Practice |
