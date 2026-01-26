@@ -105,8 +105,8 @@ The `.claude/ralph-loop.local.md` file contains the full prompt. The loop will:
 | # | SP Name | Lines | Category | Status | Session | Notes |
 |---|---------|-------|----------|--------|---------|-------|
 | 1 | stg.spDeltaSyncFactWorkersHistory | 782 | gold_facts | PASS | 2026-01-26 | Review: PASS (3 HIGH, 4 MED items) |
-| 2 | stg.spDeltaSyncFactObservations | 584 | gold_facts | PENDING | - | Priority 2 |
-| 3 | stg.spCalculateWorkerLocationAssignments | 289 | gold_facts | PENDING | - | Priority 3 |
+| 2 | stg.spDeltaSyncFactObservations | 584 | gold_facts | PASS | 2026-01-26 | Already converted (1336 lines) |
+| 3 | stg.spCalculateWorkerLocationAssignments | 289 | gold_facts | PASS | 2026-01-26 | 0 blockers, 1 HIGH (doc only) |
 | 4 | stg.spCalculateManagerAssignmentSnapshots | 265 | gold_facts | PENDING | - | |
 | 5 | stg.spDeltaSyncFactWeatherObservations | 242 | gold_facts | PENDING | - | |
 | 6 | stg.spCalculateFactReportedAttendance | 215 | gold_facts | PENDING | - | |
