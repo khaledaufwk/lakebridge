@@ -109,7 +109,7 @@ The `.claude/ralph-loop.local.md` file contains the full prompt. The loop will:
 | 3 | stg.spCalculateWorkerLocationAssignments | 289 | gold_facts | PASS | 2026-01-26 | 0 blockers, 1 HIGH (doc only) |
 | 4 | stg.spCalculateManagerAssignmentSnapshots | 265 | gold_facts | PASS | 2026-01-26 | Recursive CTE + PIVOT + MERGE |
 | 5 | stg.spDeltaSyncFactWeatherObservations | 242 | gold_facts | PASS | 2026-01-26 | 0 blockers, 16 sensor columns, float tolerance |
-| 6 | stg.spCalculateFactReportedAttendance | 215 | gold_facts | PENDING | - | |
+| 6 | stg.spCalculateFactReportedAttendance | 215 | gold_facts | PASS | 2026-01-26 | FULL OUTER JOIN + UNION + NOT MATCHED BY SOURCE |
 | 7 | stg.spDeltaSyncFactProgress | 117 | gold_facts | PENDING | - | |
 | 8 | stg.spDeltaSyncDimWorker | 227 | deltasync_dims | PENDING | - | |
 | 9 | stg.spDeltaSyncDimTask | 219 | deltasync_dims | PENDING | - | |
