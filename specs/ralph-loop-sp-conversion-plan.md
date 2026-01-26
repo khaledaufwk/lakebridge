@@ -114,21 +114,21 @@ The `.claude/ralph-loop.local.md` file contains the full prompt. The loop will:
 | 8 | stg.spDeltaSyncDimWorker | 227 | deltasync_dims | PASS | 2026-01-26 | 3 dim lookups + post-MERGE resolution |
 | 9 | stg.spDeltaSyncDimTask | 219 | deltasync_dims | SKIP | 2026-01-26 | Logic commented out in source (SELECT 0) |
 | 10 | stg.spDeltaSyncDimProject | 198 | deltasync_dims | PASS | 2026-01-26 | TimeZone + Organization lookups |
-| 11 | stg.spDeltaSyncDimWorkshiftDetails | 167 | deltasync_dims | PENDING | - | |
-| 12 | stg.spDeltaSyncDimZone | 162 | deltasync_dims | PENDING | - | SPATIAL |
-| 13 | stg.spDeltaSyncDimActivity | 160 | deltasync_dims | PENDING | - | |
-| 14 | stg.spDeltaSyncDimCrew | 151 | deltasync_dims | PENDING | - | |
-| 15 | stg.spDeltaSyncDimDevice | 149 | deltasync_dims | PENDING | - | |
-| 16 | stg.spDeltaSyncDimFloor | 137 | deltasync_dims | PENDING | - | SPATIAL |
-| 17 | stg.spDeltaSyncDimTrade | 132 | deltasync_dims | PENDING | - | |
-| 18 | stg.spDeltaSyncDimCompany | 126 | deltasync_dims | PENDING | - | |
-| 19 | stg.spDeltaSyncDimWorkerStatus | 125 | deltasync_dims | PENDING | - | |
-| 20 | stg.spDeltaSyncDimTitle | 125 | deltasync_dims | PENDING | - | |
-| 21 | stg.spDeltaSyncDimDepartment | 125 | deltasync_dims | PENDING | - | |
-| 22 | stg.spDeltaSyncDimLocationGroup | 121 | deltasync_dims | PENDING | - | |
-| 23 | stg.spDeltaSyncDimWorkshift | 115 | deltasync_dims | PENDING | - | |
-| 24 | stg.spDeltaSyncDimOrganization | 90 | deltasync_dims | PENDING | - | |
-| 25 | stg.spDeltaSyncDimObservationSource | 28 | deltasync_dims | PENDING | - | |
+| 11 | stg.spDeltaSyncDimWorkshiftDetails | 167 | deltasync_dims | PASS | 2026-01-26 | Standard dim pattern, Project lookup |
+| 12 | stg.spDeltaSyncDimZone | 162 | deltasync_dims | PASS | 2026-01-26 | SPATIAL: uses H3 for geometry |
+| 13 | stg.spDeltaSyncDimActivity | 160 | deltasync_dims | PASS | 2026-01-26 | Standard dim pattern, Project lookup |
+| 14 | stg.spDeltaSyncDimCrew | 151 | deltasync_dims | PASS | 2026-01-26 | Standard dim pattern, Project lookup |
+| 15 | stg.spDeltaSyncDimDevice | 149 | deltasync_dims | PASS | 2026-01-26 | Standard dim pattern, Project lookup |
+| 16 | stg.spDeltaSyncDimFloor | 137 | deltasync_dims | PASS | 2026-01-26 | SPATIAL: uses H3 for geometry |
+| 17 | stg.spDeltaSyncDimTrade | 132 | deltasync_dims | PASS | 2026-01-26 | Standard dim pattern, Project lookup |
+| 18 | stg.spDeltaSyncDimCompany | 126 | deltasync_dims | PASS | 2026-01-26 | Standard dim pattern, Project lookup |
+| 19 | stg.spDeltaSyncDimWorkerStatus | 125 | deltasync_dims | PASS | 2026-01-26 | Standard dim pattern |
+| 20 | stg.spDeltaSyncDimTitle | 125 | deltasync_dims | PASS | 2026-01-26 | Standard dim pattern, Project lookup |
+| 21 | stg.spDeltaSyncDimDepartment | 125 | deltasync_dims | PASS | 2026-01-26 | Standard dim pattern, Project lookup |
+| 22 | stg.spDeltaSyncDimLocationGroup | 121 | deltasync_dims | PASS | 2026-01-26 | Standard dim pattern, Project lookup |
+| 23 | stg.spDeltaSyncDimWorkshift | 115 | deltasync_dims | PASS | 2026-01-26 | Standard dim pattern, Project lookup |
+| 24 | stg.spDeltaSyncDimOrganization | 90 | deltasync_dims | PASS | 2026-01-26 | Simplest dim, no lookups |
+| 25 | stg.spDeltaSyncDimObservationSource | 28 | deltasync_dims | PASS | 2026-01-26 | Very simple, static lookup |
 | 26 | stg.spDeltaSyncLocationGroupAssignments | 201 | deltasync_assign | PENDING | - | |
 | 27 | stg.spDeltaSyncPermissions | 138 | deltasync_assign | PENDING | - | |
 | 28 | stg.spDeltaSyncWorkerLocationAssignments | 122 | deltasync_assign | PENDING | - | |
