@@ -108,7 +108,7 @@ The `.claude/ralph-loop.local.md` file contains the full prompt. The loop will:
 | 2 | stg.spDeltaSyncFactObservations | 584 | gold_facts | PASS | 2026-01-26 | Already converted (1336 lines) |
 | 3 | stg.spCalculateWorkerLocationAssignments | 289 | gold_facts | PASS | 2026-01-26 | 0 blockers, 1 HIGH (doc only) |
 | 4 | stg.spCalculateManagerAssignmentSnapshots | 265 | gold_facts | PASS | 2026-01-26 | Recursive CTE + PIVOT + MERGE |
-| 5 | stg.spDeltaSyncFactWeatherObservations | 242 | gold_facts | PENDING | - | |
+| 5 | stg.spDeltaSyncFactWeatherObservations | 242 | gold_facts | PASS | 2026-01-26 | 0 blockers, 16 sensor columns, float tolerance |
 | 6 | stg.spCalculateFactReportedAttendance | 215 | gold_facts | PENDING | - | |
 | 7 | stg.spDeltaSyncFactProgress | 117 | gold_facts | PENDING | - | |
 | 8 | stg.spDeltaSyncDimWorker | 227 | deltasync_dims | PENDING | - | |
