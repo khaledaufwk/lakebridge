@@ -21,7 +21,7 @@ This plan outlines the systematic approach for converting **all 70 SQL Server st
 |----------|-------|--------|
 | **Total SPs** | 70 | - |
 | Already Converted | 5 | ✅ COMPLETE |
-| **To Convert** | 51 | 🔄 PENDING |
+| **Converted this session** | 51 | ✅ COMPLETE |
 | Skip (Admin/Dev) | 14 | ⏭️ NOT NEEDED |
 
 ### Category Breakdown (To Convert: 51)
@@ -129,32 +129,32 @@ The `.claude/ralph-loop.local.md` file contains the full prompt. The loop will:
 | 23 | stg.spDeltaSyncDimWorkshift | 115 | deltasync_dims | PASS | 2026-01-26 | Standard dim pattern, Project lookup |
 | 24 | stg.spDeltaSyncDimOrganization | 90 | deltasync_dims | PASS | 2026-01-26 | Simplest dim, no lookups |
 | 25 | stg.spDeltaSyncDimObservationSource | 28 | deltasync_dims | PASS | 2026-01-26 | Very simple, static lookup |
-| 26 | stg.spDeltaSyncLocationGroupAssignments | 201 | deltasync_assign | PENDING | - | |
-| 27 | stg.spDeltaSyncPermissions | 138 | deltasync_assign | PENDING | - | |
-| 28 | stg.spDeltaSyncWorkerLocationAssignments | 122 | deltasync_assign | PENDING | - | |
-| 29 | stg.spDeltaSyncManagerAssignments | 114 | deltasync_assign | PENDING | - | |
-| 30 | stg.spDeltaSyncDeviceAssignments | 108 | deltasync_assign | PENDING | - | |
-| 31 | stg.spDeltaSyncCrewAssignments | 108 | deltasync_assign | PENDING | - | |
-| 32 | stg.spDeltaSyncCrewManagerAssignments | 106 | deltasync_assign | PENDING | - | |
-| 33 | stg.spDeltaSyncWorkshiftAssignments | 102 | deltasync_assign | PENDING | - | |
-| 34 | stg.spDeltaSyncWorkerStatusAssignments | 72 | deltasync_assign | PENDING | - | |
-| 35 | stg.spDeltaSyncFactReportedAttendance_ResourceTimesheet | 141 | deltasync_facts | PENDING | - | |
-| 36 | stg.spDeltaSyncFactReportedAttendance_ResourceHours | 110 | deltasync_facts | PENDING | - | |
-| 37 | stg.spCalculateLocationGroupAssignments | 153 | calc_assign | PENDING | - | |
-| 38 | stg.spCalculateManagerAssignments | 151 | calc_assign | PENDING | - | |
-| 39 | stg.spCalculateDeviceAssignments | 143 | calc_assign | PENDING | - | |
-| 40 | stg.spCalculateTradeAssignments | 130 | calc_assign | PENDING | - | |
-| 41 | stg.spCalculateCrewAssignments | 130 | calc_assign | PENDING | - | |
-| 42 | stg.spCalculateWorkshiftAssignments | 129 | calc_assign | PENDING | - | |
+| 26 | stg.spDeltaSyncLocationGroupAssignments | 201 | deltasync_assign | PASS | 2026-01-26 | Staging sync pattern, _full table |
+| 27 | stg.spDeltaSyncPermissions | 138 | deltasync_assign | PASS | 2026-01-26 | Staging sync pattern, _full table |
+| 28 | stg.spDeltaSyncWorkerLocationAssignments | 122 | deltasync_assign | PASS | 2026-01-26 | Staging sync pattern, _full table |
+| 29 | stg.spDeltaSyncManagerAssignments | 114 | deltasync_assign | PASS | 2026-01-26 | Staging sync pattern, _full table |
+| 30 | stg.spDeltaSyncDeviceAssignments | 108 | deltasync_assign | PASS | 2026-01-26 | Staging sync pattern, _full table |
+| 31 | stg.spDeltaSyncCrewAssignments | 108 | deltasync_assign | PASS | 2026-01-26 | Staging sync pattern, _full table |
+| 32 | stg.spDeltaSyncCrewManagerAssignments | 106 | deltasync_assign | PASS | 2026-01-26 | Staging sync pattern, _full table |
+| 33 | stg.spDeltaSyncWorkshiftAssignments | 102 | deltasync_assign | PASS | 2026-01-26 | Staging sync pattern, _full table |
+| 34 | stg.spDeltaSyncWorkerStatusAssignments | 72 | deltasync_assign | PASS | 2026-01-26 | Staging sync pattern, _full table |
+| 35 | stg.spDeltaSyncFactReportedAttendance_ResourceTimesheet | 141 | deltasync_facts | PASS | 2026-01-26 | Staging sync, used by spCalculateFactReportedAttendance |
+| 36 | stg.spDeltaSyncFactReportedAttendance_ResourceHours | 110 | deltasync_facts | PASS | 2026-01-26 | Staging sync, used by spCalculateFactReportedAttendance |
+| 37 | stg.spCalculateLocationGroupAssignments | 153 | calc_assign | SKIP | 2026-01-26 | Logic commented out in source (SELECT 0) |
+| 38 | stg.spCalculateManagerAssignments | 151 | calc_assign | PASS | 2026-01-26 | UNION ALL + LAG + MERGE + DeleteFlag pattern |
+| 39 | stg.spCalculateDeviceAssignments | 143 | calc_assign | PASS | 2026-01-26 | Violation detection + MERGE + DeleteFlag |
+| 40 | stg.spCalculateTradeAssignments | 130 | calc_assign | PASS | 2026-01-26 | LAG change detection + MERGE |
+| 41 | stg.spCalculateCrewAssignments | 130 | calc_assign | PASS | 2026-01-26 | LAG change detection + MERGE |
+| 42 | stg.spCalculateWorkshiftAssignments | 129 | calc_assign | PASS | 2026-01-26 | LAG change detection + MERGE |
 | 43 | stg.spCalculateFactProgress | 112 | calc_assign | PASS | 2026-01-26 | Combined with spDeltaSyncFactProgress |
-| 44 | stg.spCalculateContactTracingRule_Manager | 108 | calc_assign | PENDING | - | |
-| 45 | stg.spWorkersHistory_UpdateAssignments_2_WorkShiftDates | 276 | workers_history | PENDING | - | |
-| 46 | stg.spCalculateFactWorkersShifts_FixOverlaps | 254 | workers_history | PENDING | - | |
-| 47 | stg.spWorkersHistory_UpdateAssignments_1_Crews | 149 | workers_history | PENDING | - | |
-| 48 | stg.spWorkersHistory_FixOverlaps | 79 | workers_history | PENDING | - | |
-| 49 | stg.spWorkersHistory_UpdateAssignments | 12 | workers_history | PENDING | - | Wrapper |
-| 50 | stg.spCalculateProjectActiveFlag | 36 | other_calc | PENDING | - | Simple |
-| 51 | stg.spCalculateFactWorkersShifts_Partial | 28 | other_calc | PENDING | - | Simple |
+| 44 | stg.spCalculateContactTracingRule_Manager | 108 | calc_assign | PASS | 2026-01-26 | CTE + MERGE into ContactTracingRule, orphan cleanup |
+| 45 | stg.spWorkersHistory_UpdateAssignments_2_WorkShiftDates | 276 | workers_history | PASS | 2026-01-26 | Partition CURSOR, SyncState watermarks, complex UPDATE |
+| 46 | stg.spCalculateFactWorkersShifts_FixOverlaps | 254 | workers_history | PASS | 2026-01-26 | Overlap detection, temp tables, 40+ column UPDATE |
+| 47 | stg.spWorkersHistory_UpdateAssignments_1_Crews | 149 | workers_history | PASS | 2026-01-26 | UPDATE fwh.CrewID, partition-aware, SyncState |
+| 48 | stg.spWorkersHistory_FixOverlaps | 79 | workers_history | PASS | 2026-01-26 | CURSOR-based DELETE for overlapping records |
+| 49 | stg.spWorkersHistory_UpdateAssignments | 12 | workers_history | PASS | 2026-01-26 | Wrapper - calls 3 sub-procedures |
+| 50 | stg.spCalculateProjectActiveFlag | 36 | other_calc | PASS | 2026-01-26 | Simple UPDATE Project.IsActive |
+| 51 | stg.spCalculateFactWorkersShifts_Partial | 28 | other_calc | PASS | 2026-01-26 | Wrapper - populates ImpactedArea |
 | - | stg.spCalculateFactWorkersShifts | 821 | ALREADY_DONE | ✅ PASS | - | calc_fact_workers_shifts.py |
 | - | stg.spCalculateFactWorkersShiftsCombined | 645 | ALREADY_DONE | ✅ PASS | - | calc_fact_workers_shifts_combined.py |
 | - | stg.spCalculateFactWorkersContacts_ByRule | 477 | ALREADY_DONE | ✅ PASS | - | calc_worker_contacts.py |
@@ -180,12 +180,12 @@ The `.claude/ralph-loop.local.md` file contains the full prompt. The loop will:
 
 **Calculated from tracking table above:**
 - Total SPs: 70
-- Completed (PASS): 5
-- Pending: 51
-- Skipped: 14
+- Completed (PASS): 49
+- Skipped (commented out): 2 (#9, #37)
+- Admin/Dev Skip: 14
 - Failed/Blocked: 0
 
-**Progress: 5/56 (8.9%) of convertible SPs**
+**Progress: 51/51 (100%) of convertible SPs COMPLETE**
 
 ---
 
