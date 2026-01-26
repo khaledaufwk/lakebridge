@@ -111,7 +111,7 @@ The `.claude/ralph-loop.local.md` file contains the full prompt. The loop will:
 | 5 | stg.spDeltaSyncFactWeatherObservations | 242 | gold_facts | PASS | 2026-01-26 | 0 blockers, 16 sensor columns, float tolerance |
 | 6 | stg.spCalculateFactReportedAttendance | 215 | gold_facts | PASS | 2026-01-26 | FULL OUTER JOIN + UNION + NOT MATCHED BY SOURCE |
 | 7 | stg.spDeltaSyncFactProgress | 117 | gold_facts | PASS | 2026-01-26 | Combined with spCalculateFactProgress |
-| 8 | stg.spDeltaSyncDimWorker | 227 | deltasync_dims | PENDING | - | |
+| 8 | stg.spDeltaSyncDimWorker | 227 | deltasync_dims | PASS | 2026-01-26 | 3 dim lookups + post-MERGE resolution |
 | 9 | stg.spDeltaSyncDimTask | 219 | deltasync_dims | PENDING | - | |
 | 10 | stg.spDeltaSyncDimProject | 198 | deltasync_dims | PENDING | - | |
 | 11 | stg.spDeltaSyncDimWorkshiftDetails | 167 | deltasync_dims | PENDING | - | |
