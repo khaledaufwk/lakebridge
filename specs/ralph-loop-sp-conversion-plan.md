@@ -110,7 +110,7 @@ The `.claude/ralph-loop.local.md` file contains the full prompt. The loop will:
 | 4 | stg.spCalculateManagerAssignmentSnapshots | 265 | gold_facts | PASS | 2026-01-26 | Recursive CTE + PIVOT + MERGE |
 | 5 | stg.spDeltaSyncFactWeatherObservations | 242 | gold_facts | PASS | 2026-01-26 | 0 blockers, 16 sensor columns, float tolerance |
 | 6 | stg.spCalculateFactReportedAttendance | 215 | gold_facts | PASS | 2026-01-26 | FULL OUTER JOIN + UNION + NOT MATCHED BY SOURCE |
-| 7 | stg.spDeltaSyncFactProgress | 117 | gold_facts | PENDING | - | |
+| 7 | stg.spDeltaSyncFactProgress | 117 | gold_facts | PASS | 2026-01-26 | Combined with spCalculateFactProgress |
 | 8 | stg.spDeltaSyncDimWorker | 227 | deltasync_dims | PENDING | - | |
 | 9 | stg.spDeltaSyncDimTask | 219 | deltasync_dims | PENDING | - | |
 | 10 | stg.spDeltaSyncDimProject | 198 | deltasync_dims | PENDING | - | |
@@ -146,7 +146,7 @@ The `.claude/ralph-loop.local.md` file contains the full prompt. The loop will:
 | 40 | stg.spCalculateTradeAssignments | 130 | calc_assign | PENDING | - | |
 | 41 | stg.spCalculateCrewAssignments | 130 | calc_assign | PENDING | - | |
 | 42 | stg.spCalculateWorkshiftAssignments | 129 | calc_assign | PENDING | - | |
-| 43 | stg.spCalculateFactProgress | 112 | calc_assign | PENDING | - | |
+| 43 | stg.spCalculateFactProgress | 112 | calc_assign | PASS | 2026-01-26 | Combined with spDeltaSyncFactProgress |
 | 44 | stg.spCalculateContactTracingRule_Manager | 108 | calc_assign | PENDING | - | |
 | 45 | stg.spWorkersHistory_UpdateAssignments_2_WorkShiftDates | 276 | workers_history | PENDING | - | |
 | 46 | stg.spCalculateFactWorkersShifts_FixOverlaps | 254 | workers_history | PENDING | - | |
