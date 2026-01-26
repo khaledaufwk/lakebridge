@@ -1,0 +1,337 @@
+# Gold Layer Table Configuration
+# ================================
+# Defines the Gold layer tables for WakeCapDW migration
+
+catalog: wakecap_prod
+schema: gold
+
+tables:
+  # =====================
+  # FACT TABLES
+  # =====================
+
+  - name: gold_fact_workers_history
+    source_table: silver_fact_workers_history
+    description: "Enriched worker location history with computed fields"
+    row_estimate: 82000000
+    partition_by: [ShiftLocalDate]
+    z_order_by: [ProjectId, WorkerId]
+    primary_key: [WorkersHistoryId]
+
+    columns:
+      - name: WorkersHistoryId
+        type: BIGINT
+        source: DeviceLocationId
+        description: "Unique identifier (from DeviceLocation.Id)"
+
+      - name: TimestampUTC
+        type: TIMESTAMP
+        source: GeneratedAt
+        description: "Reading timestamp in UTC"
+
+      - name: LocalDate
+        type: DATE
+        computed: true
+        description: "Local date based on project timezone"
+
+      - name: ShiftLocalDate
+        type: DATE
+        computed: true
+        description: "Assigned shift date (may differ from LocalDate)"
+
+      - name: WorkerId
+        type: INT
+        lookup: DeviceAssignments
+        description: "Worker ID from device assignment"
+
+      - name: ProjectId
+        type: INT
+        source: ProjectId
+
+      - name: ZoneId
+        type: INT
+        spatial_lookup: true
+        description: "Zone containing the location"
+
+      - name: FloorId
+        type: INT
+        source: SpaceId
+
+      - name: CrewId
+        type: INT
+        lookup: CrewAssignments
+        description: "Crew at shift date"
+
+      - name: WorkshiftId
+        type: INT
+        lookup: WorkshiftAssignments
+
+      - name: WorkshiftDetailsId
+        type: INT
+        lookup: WorkshiftDetails
+
+      - name: ActiveTime
+        type: DOUBLE
+        description: "Active time in days (fraction)"
+
+      - name: InactiveTime
+        type: DOUBLE
+        description: "Inactive time in days (fraction)"
+
+      - name: Latitude
+        type: DOUBLE
+        parsed_from: PointWKT
+
+      - name: Longitude
+        type: DOUBLE
+        parsed_from: PointWKT
+
+      - name: ErrorDistance
+        type: DOUBLE
+        description: "Location error buffer in meters"
+
+      - name: Sequence
+        type: INT
+        source: ActiveSequence
+
+      - name: SequenceInactive
+        type: INT
+        source: InactiveSequence
+
+      - name: TimeCategoryId
+        type: INT
+        computed: true
+        description: "1=During, 2=NoShift, 3=Break, 4=After, 5=Before"
+
+      - name: LocationAssignmentClassId
+        type: INT
+        computed: true
+        description: "1=In assigned area, NULL=Not"
+
+      - name: ProductiveClassId
+        type: INT
+        lookup: Zone
+        description: "1=Direct, 2=Indirect"
+
+      - name: ExtSourceId
+        type: INT
+        constant: 17
+        description: "17=TimescaleDB"
+
+      - name: CreatedAt
+        type: TIMESTAMP
+        source: CreatedAt
+
+  - name: gold_fact_workers_shifts
+    source_table: gold_fact_workers_history
+    description: "Aggregated shift-level metrics per worker"
+    row_estimate: 5000000
+    partition_by: [ShiftLocalDate]
+    z_order_by: [ProjectId, WorkerId]
+    primary_key: [ProjectId, WorkerId, StartAtUTC]
+
+    columns:
+      - name: ProjectId
+        type: INT
+
+      - name: WorkerId
+        type: INT
+
+      - name: ShiftLocalDate
+        type: DATE
+
+      - name: StartAtUTC
+        type: TIMESTAMP
+        description: "Shift start (first active reading - ~4 min)"
+
+      - name: FinishAtUTC
+        type: TIMESTAMP
+        description: "Shift end (last reading + ~3 min)"
+
+      - name: ActiveTime
+        type: DOUBLE
+        aggregation: SUM
+
+      - name: ActiveTimeBeforeShift
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 5"
+
+      - name: ActiveTimeDuringShift
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 1"
+
+      - name: ActiveTimeAfterShift
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 4"
+
+      - name: FirstDirectProductiveUTC
+        type: TIMESTAMP
+        aggregation: "MIN WHERE ProductiveClassId = 1 AND ActiveTime > 0"
+
+      - name: LastDirectProductiveUTC
+        type: TIMESTAMP
+        aggregation: "MAX WHERE ProductiveClassId = 1 AND ActiveTime > 0"
+
+      - name: FirstAssignedLocationUTC
+        type: TIMESTAMP
+        aggregation: "MIN WHERE LocationAssignmentClassId = 1 AND ActiveTime > 0"
+
+      - name: LastAssignedLocationUTC
+        type: TIMESTAMP
+        aggregation: "MAX WHERE LocationAssignmentClassId = 1 AND ActiveTime > 0"
+
+      - name: ReadingsMissedActive
+        type: INT
+        aggregation: SUM
+
+      - name: ReadingsMissedActiveDuringShift
+        type: INT
+        aggregation: "SUM WHERE TimeCategoryId = 1"
+
+      - name: ReadingsMissedInactive
+        type: INT
+        aggregation: SUM
+
+      - name: ReadingsMissedInactiveDuringShift
+        type: INT
+        aggregation: "SUM WHERE TimeCategoryId = 1"
+
+      - name: Readings
+        type: INT
+        aggregation: COUNT
+
+      - name: InactiveTime
+        type: DOUBLE
+        aggregation: SUM
+
+      - name: InactiveTimeDuringShift
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 1"
+
+      - name: InactiveTimeBeforeShift
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 5"
+
+      - name: InactiveTimeAfterShift
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 4"
+
+      # Direct Productive metrics
+      - name: ActiveTimeInDirectProductive
+        type: DOUBLE
+        aggregation: "SUM WHERE ProductiveClassId = 1"
+
+      - name: ActiveTimeDuringShiftInDirectProductive
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 1 AND ProductiveClassId = 1"
+
+      - name: ActiveTimeBeforeShiftInDirectProductive
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 5 AND ProductiveClassId = 1"
+
+      - name: ActiveTimeAfterShiftInDirectProductive
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 4 AND ProductiveClassId = 1"
+
+      # Indirect Productive metrics
+      - name: ActiveTimeInIndirectProductive
+        type: DOUBLE
+        aggregation: "SUM WHERE ProductiveClassId = 2"
+
+      - name: ActiveTimeDuringShiftInIndirectProductive
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 1 AND ProductiveClassId = 2"
+
+      - name: ActiveTimeBeforeShiftInIndirectProductive
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 5 AND ProductiveClassId = 2"
+
+      - name: ActiveTimeAfterShiftInIndirectProductive
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 4 AND ProductiveClassId = 2"
+
+      # Assigned Location metrics
+      - name: ActiveTimeInAssignedLocation
+        type: DOUBLE
+        aggregation: "SUM WHERE LocationAssignmentClassId = 1"
+
+      - name: ActiveTimeDuringShiftInAssignedLocation
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 1 AND LocationAssignmentClassId = 1"
+
+      - name: ActiveTimeBeforeShiftInAssignedLocation
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 5 AND LocationAssignmentClassId = 1"
+
+      - name: ActiveTimeAfterShiftInAssignedLocation
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 4 AND LocationAssignmentClassId = 1"
+
+      - name: InactiveTimeInAssignedLocation
+        type: DOUBLE
+        aggregation: "SUM WHERE LocationAssignmentClassId = 1"
+
+      - name: InactiveTimeDuringShiftInAssignedLocation
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 1 AND LocationAssignmentClassId = 1"
+
+      - name: InactiveTimeBeforeShiftInAssignedLocation
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 5 AND LocationAssignmentClassId = 1"
+
+      - name: InactiveTimeAfterShiftInAssignedLocation
+        type: DOUBLE
+        aggregation: "SUM WHERE TimeCategoryId = 4 AND LocationAssignmentClassId = 1"
+
+      - name: ExtSourceId
+        type: INT
+        constant: 17
+        description: "17=TimescaleDB"
+
+      - name: WatermarkUTC
+        type: TIMESTAMP
+        description: "Processing watermark"
+
+# Schedule Configuration
+schedule:
+  cron: "0 0 5 * * ?"  # 5:00 AM UTC daily
+  timezone: UTC
+  depends_on:
+    - WakeCapDW_Silver_TimescaleDB  # Must complete first
+
+# Data Quality Expectations
+expectations:
+  gold_fact_workers_history:
+    critical:
+      - "WorkersHistoryId IS NOT NULL"
+      - "TimestampUTC IS NOT NULL"
+      - "ProjectId IS NOT NULL"
+      - "WorkerId IS NOT NULL"
+    business:
+      - "ShiftLocalDate IS NOT NULL"
+      - "TimeCategoryId BETWEEN 1 AND 5"
+    advisory:
+      - "Latitude BETWEEN -90 AND 90 OR Latitude IS NULL"
+      - "Longitude BETWEEN -180 AND 180 OR Longitude IS NULL"
+
+  gold_fact_workers_shifts:
+    critical:
+      - "ProjectId IS NOT NULL"
+      - "WorkerId IS NOT NULL"
+      - "StartAtUTC IS NOT NULL"
+    business:
+      - "FinishAtUTC >= StartAtUTC"
+      - "ActiveTime >= 0"
+      - "Readings > 0"
+    advisory:
+      - "ActiveTime < 1"  # Less than 1 day
+
+# Watermark Configuration
+watermarks:
+  table: wakecap_prod.migration._gold_watermarks
+  columns:
+    - table_name: STRING
+    - last_processed_at: TIMESTAMP
+    - last_watermark_value: TIMESTAMP
+    - row_count: BIGINT
+    - updated_at: TIMESTAMP
