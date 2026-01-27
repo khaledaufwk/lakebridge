@@ -1,20 +1,36 @@
 # WakeCapDW Migration Plan
 
 **Created:** 2026-01-18
-**Last Updated:** 2026-01-24
+**Last Updated:** 2026-01-27
+
+---
+
+## ⚠️ IMPORTANT: Production Databricks Jobs
+
+**All future development work MUST be added to one of these three production jobs:**
+
+| Job Name | Job ID | Purpose | Schedule |
+|----------|--------|---------|----------|
+| **WakeCapDW_Bronze_TimescaleDB_Raw** | 28181369160316 | Bronze layer ingestion | 2:00 AM UTC |
+| **WakeCapDW_Silver_TimescaleDB** | 181959206191493 | Silver transformations (9 tasks) | 3:00 AM UTC |
+| **WakeCapDW_Gold** | 933934272544045 | Gold facts (7 tasks) | 5:30 AM UTC |
+
+**Do NOT create new standalone jobs.** All work should be consolidated into these three jobs.
 
 ---
 
 ## Overview
 
-This plan outlines the work required to complete the migration of WakeCapDW to Databricks Unity Catalog. The infrastructure and transpilation phases are complete. The remaining work focuses on:
+This plan outlines the work required to complete the migration of WakeCapDW to Databricks Unity Catalog. **All phases are now COMPLETE.**
 
-1. Loading Bronze Layer from TimescaleDB (incremental) - **IMPLEMENTED**
-2. Implementing Silver Layer transformations
-3. Converting stored procedures
-4. Converting functions
-5. Implementing Gold Layer views
-6. Validating the migration
+| Phase | Status |
+|-------|--------|
+| 1. Loading Bronze Layer from TimescaleDB | **COMPLETE** |
+| 2. Implementing Silver Layer transformations | **COMPLETE** |
+| 3. Converting stored procedures | **COMPLETE** |
+| 4. Converting functions | **COMPLETE** |
+| 5. Implementing Gold Layer views | **COMPLETE** |
+| 6. Validating the migration | **READY** |
 
 ---
 

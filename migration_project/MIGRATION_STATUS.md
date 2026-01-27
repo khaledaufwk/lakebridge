@@ -1,9 +1,23 @@
 # WakeCapDW Migration Status Report
 
 **Generated:** 2026-01-19
-**Last Updated:** 2026-01-24
+**Last Updated:** 2026-01-27
 **Source:** TimescaleDB (wakecap_app) + WakeCapDW_20251215 (Azure SQL Server)
 **Target:** Databricks Unity Catalog (wakecap_prod)
+
+---
+
+## ⚠️ IMPORTANT: Production Databricks Jobs
+
+**All future development work MUST be added to one of these three production jobs:**
+
+| Job Name | Job ID | Purpose | Schedule |
+|----------|--------|---------|----------|
+| **WakeCapDW_Bronze_TimescaleDB_Raw** | 28181369160316 | Bronze layer ingestion | 2:00 AM UTC |
+| **WakeCapDW_Silver_TimescaleDB** | 181959206191493 | Silver transformations (9 tasks) | 3:00 AM UTC |
+| **WakeCapDW_Gold** | 933934272544045 | Gold facts (7 tasks) | 5:30 AM UTC |
+
+**Do NOT create new standalone jobs.** All work should be consolidated into these three jobs.
 
 ---
 
@@ -17,9 +31,10 @@
 | Views | 34/34 (100%) |
 | Stored Procedures | 70/70 (100%) |
 | Functions | 23/23 (100%) |
-| Pipeline Status | Deployed (Development Mode) |
+| Pipeline Status | **PRODUCTION** |
 | **Bronze Layer (TimescaleDB)** | **78 tables LOADED** |
-| **Silver Layer** | **DEPLOYED (77 tables)** |
+| **Silver Layer** | **DEPLOYED (77 tables, 9 tasks)** |
+| **Gold Layer** | **DEPLOYED (7 tasks)** |
 
 ---
 
@@ -35,11 +50,11 @@
 | 6. ADF Extraction to ADLS | READY | 100% (artifacts) |
 | 7. Data Ingestion (Bronze) | **COMPLETE** | **100%** |
 | 8. Data Transformation (Silver) | **DEPLOYED** | **100%** |
-| 9. Business Layer (Gold) | CONVERTED | 100% |
+| 9. Business Layer (Gold) | **DEPLOYED** | **100%** |
 | 10. Stored Procedure Conversion | COMPLETE | 100% |
 | 11. Function Conversion | COMPLETE | 100% |
 | 12. Reconciliation | READY | 100% |
-| 13. Production Deployment | PENDING | 0% |
+| 13. Production Deployment | **COMPLETE** | **100%** |
 
 ---
 

@@ -2,6 +2,57 @@
 
 This guide provides step-by-step instructions for deploying the WakeCapDW migration to production.
 
+---
+
+## ⚠️ IMPORTANT: Production Databricks Jobs
+
+**All future development work MUST be added to one of these three production jobs:**
+
+| Job Name | Job ID | Purpose | Schedule | Workspace Path |
+|----------|--------|---------|----------|----------------|
+| **WakeCapDW_Bronze_TimescaleDB_Raw** | 28181369160316 | Bronze layer ingestion from TimescaleDB | 2:00 AM UTC | `/Workspace/migration_project/pipelines/timescaledb/notebooks/` |
+| **WakeCapDW_Silver_TimescaleDB** | 181959206191493 | Silver layer transformations (9 tasks) | 3:00 AM UTC | `/Workspace/migration_project/pipelines/silver/notebooks/` |
+| **WakeCapDW_Gold** | 933934272544045 | Gold layer facts and aggregations (7 tasks) | 5:30 AM UTC | `/Workspace/migration_project/pipelines/gold/notebooks/` |
+
+### Job URLs
+- **Bronze:** https://adb-3022397433351638.18.azuredatabricks.net/#job/28181369160316
+- **Silver:** https://adb-3022397433351638.18.azuredatabricks.net/#job/181959206191493
+- **Gold:** https://adb-3022397433351638.18.azuredatabricks.net/#job/933934272544045
+
+### Adding New Work
+
+When adding new notebooks or transformations:
+
+1. **Determine the appropriate layer:**
+   - **Bronze** - Raw data ingestion from source systems
+   - **Silver** - Data cleansing, deduplication, standardization
+   - **Gold** - Business logic, aggregations, facts, dimensions for reporting
+
+2. **Create your notebook** in the appropriate local directory:
+   - Bronze: `migration_project/pipelines/timescaledb/notebooks/`
+   - Silver: `migration_project/pipelines/silver/notebooks/`
+   - Gold: `migration_project/pipelines/gold/notebooks/`
+
+3. **Upload to Databricks** using the corresponding workspace path
+
+4. **Add as a task** to the appropriate job with correct dependencies
+
+5. **Do NOT create new standalone jobs** - all work should be consolidated into these three jobs
+
+### Pipeline Execution Order
+
+```
+WakeCapDW_Bronze_TimescaleDB_Raw (2:00 AM UTC)
+         │
+         ▼
+WakeCapDW_Silver_TimescaleDB (3:00 AM UTC)
+         │
+         ▼
+WakeCapDW_Gold (5:30 AM UTC)
+```
+
+---
+
 ## Prerequisites
 
 ### Azure Resources
@@ -535,73 +586,108 @@ databricks secrets put-secret wakecap-secrets sp-client-secret --string-value "y
 
 ---
 
-## Phase 5: DLT Pipeline Deployment (Gold Layer)
+## Phase 3: Gold Layer - Business Logic
 
-### 3.1 Upload Notebooks to Workspace
+**Status: DEPLOYED (2026-01-27)**
 
-**Option A: Python Script**
-```bash
-cd migration_project
-python databricks/deploy_to_databricks.py
+| Metric | Value |
+|--------|-------|
+| Tables Deployed | 7 |
+| Target Schema | wakecap_prod.gold |
+| Job Name | WakeCapDW_Gold |
+| Job ID | 933934272544045 |
+| Load Method | Watermark-based incremental from Silver |
+| Schedule | Daily 5:30 AM UTC |
+
+The Gold layer contains business logic, facts, and aggregations for reporting.
+
+### Architecture
+
+```
+┌─────────────────────┐                    ┌─────────────────────┐
+│  Silver Layer       │ ────────────────>  │  Gold Layer         │
+│  wakecap_prod.silver│                    │  wakecap_prod.gold  │
+│  (77 silver_*)      │                    │  (7 gold_*)         │
+└─────────────────────┘                    └─────────────────────┘
 ```
 
-**Option B: Databricks CLI**
-```bash
-# Create folders
-databricks workspace mkdirs /Workspace/WakeCapDW/dlt
-databricks workspace mkdirs /Workspace/WakeCapDW/notebooks
-databricks workspace mkdirs /Workspace/WakeCapDW/udfs
+### 3.1 Gold Job Structure
 
-# Upload DLT notebooks
-databricks workspace import pipelines/dlt/bronze_all_tables.py /Workspace/WakeCapDW/dlt/bronze_all_tables --format SOURCE --language PYTHON --overwrite
-databricks workspace import pipelines/dlt/streaming_dimensions.py /Workspace/WakeCapDW/dlt/streaming_dimensions --format SOURCE --language PYTHON --overwrite
-databricks workspace import pipelines/dlt/streaming_facts.py /Workspace/WakeCapDW/dlt/streaming_facts --format SOURCE --language PYTHON --overwrite
-databricks workspace import pipelines/dlt/batch_calculations.py /Workspace/WakeCapDW/dlt/batch_calculations --format SOURCE --language PYTHON --overwrite
-databricks workspace import pipelines/dlt/silver_dimensions.py /Workspace/WakeCapDW/dlt/silver_dimensions --format SOURCE --language PYTHON --overwrite
-databricks workspace import pipelines/dlt/silver_facts.py /Workspace/WakeCapDW/dlt/silver_facts --format SOURCE --language PYTHON --overwrite
-databricks workspace import pipelines/dlt/gold_views.py /Workspace/WakeCapDW/dlt/gold_views --format SOURCE --language PYTHON --overwrite
+The Gold job has 7 tasks:
+
+```
+Task Dependencies:
+──────────────────────────────────────────────────────────────────
+gold_fact_workers_history ──> gold_fact_workers_shifts
+
+Independent (run in parallel):
+  - gold_fact_weather_observations
+  - gold_fact_reported_attendance
+  - gold_fact_progress
+  - gold_worker_location_assignments
+  - gold_manager_assignment_snapshots
 ```
 
-### 3.2 Create DLT Pipeline
+| Task | Description | Depends On |
+|------|-------------|------------|
+| gold_fact_workers_history | Worker shift history aggregation | (none) |
+| gold_fact_workers_shifts | Derived shift calculations | gold_fact_workers_history |
+| gold_fact_weather_observations | Weather data by project | (none) |
+| gold_fact_reported_attendance | Attendance reporting | (none) |
+| gold_fact_progress | Progress tracking | (none) |
+| gold_worker_location_assignments | Worker location assignments | (none) |
+| gold_manager_assignment_snapshots | Manager hierarchy snapshots | (none) |
 
-```bash
-# Create pipeline
-databricks pipelines create --json @databricks/dlt_pipeline_config.json
+### 3.2 Deploy Gold Layer
+
+Gold notebooks are located at:
+- **Local:** `migration_project/pipelines/gold/notebooks/`
+- **Databricks:** `/Workspace/migration_project/pipelines/gold/notebooks/`
+
+To add a new gold notebook:
+
+```python
+# 1. Create notebook locally
+# migration_project/pipelines/gold/notebooks/gold_new_fact.py
+
+# 2. Upload to Databricks
+from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.workspace import ImportFormat, Language
+import base64
+
+w = WorkspaceClient()
+content = Path('migration_project/pipelines/gold/notebooks/gold_new_fact.py').read_text()
+w.workspace.import_(
+    path='/Workspace/migration_project/pipelines/gold/notebooks/gold_new_fact',
+    content=base64.b64encode(content.encode()).decode(),
+    format=ImportFormat.SOURCE,
+    language=Language.PYTHON,
+    overwrite=True
+)
+
+# 3. Add task to WakeCapDW_Gold job (Job ID: 933934272544045)
 ```
 
-Or via UI:
-1. Open Databricks workspace
-2. Navigate to Workflows > Delta Live Tables
-3. Click "Create Pipeline"
-4. Configure:
-   - Name: WakeCapDW_Migration_Pipeline
-   - Target: wakecap_prod.migration
-   - Source: Add all 7 DLT notebooks
-   - Cluster: Use cluster_config.json settings
-5. Save
+### 3.3 Run Gold Job
 
-### 3.3 Install Required Libraries
+**Job URL:** https://adb-3022397433351638.18.azuredatabricks.net/#job/933934272544045
 
-The DLT pipeline cluster needs h3 and shapely. These are specified in `cluster_config.json`.
-
-If using interactive cluster for testing:
+Via CLI:
 ```bash
-# Install on running cluster
-databricks libraries install --cluster-id <cluster-id> --pypi-package h3==3.7.6
-databricks libraries install --cluster-id <cluster-id> --pypi-package shapely==2.0.2
+databricks jobs run-now --job-id 933934272544045
 ```
 
-### 3.4 Start Pipeline (Development Mode)
+### 3.4 Verify Gold Tables
 
-```bash
-# Start pipeline
-databricks pipelines start <pipeline-id>
+```sql
+-- Check Gold tables
+SHOW TABLES IN wakecap_prod.gold;
+
+-- Row counts
+SELECT 'gold_fact_workers_history' as table_name, COUNT(*) as cnt FROM wakecap_prod.gold.gold_fact_workers_history
+UNION ALL
+SELECT 'gold_manager_assignment_snapshots', COUNT(*) FROM wakecap_prod.gold.gold_manager_assignment_snapshots;
 ```
-
-Or via UI:
-1. Open pipeline in Databricks
-2. Click "Start" (development mode)
-3. Monitor execution in pipeline graph view
 
 ---
 
@@ -775,10 +861,11 @@ SET ROW FILTER security.organization_filter ON (OrganizationID);
 │       │ DLT transformations                                               │
 │       ▼                                                                    │
 │  ┌─────────────────────────────────────────────────────────────────────┐ │
-│  │  GOLD LAYER (wakecap_prod.gold)                          PENDING    │ │
-│  │  - Business views                                                   │ │
-│  │  - Aggregations                                                     │ │
-│  │  - Row-level security                                               │ │
+│  │  GOLD LAYER (wakecap_prod.gold)                          DEPLOYED   │ │
+│  │  - 7 tables: gold_*                                                 │ │
+│  │  - Job: WakeCapDW_Gold (ID: 933934272544045)                        │ │
+│  │  - Schedule: Daily 5:30 AM UTC                                      │ │
+│  │  - Business facts and aggregations                                  │ │
 │  └─────────────────────────────────────────────────────────────────────┘ │
 │                                                                            │
 └───────────────────────────────────────────────────────────────────────────┘
@@ -786,11 +873,13 @@ SET ROW FILTER security.organization_filter ON (OrganizationID);
 
 ### Schedule Coordination
 
-| Job | Schedule | Purpose |
-|-----|----------|---------|
-| WakeCapDW_Bronze_TimescaleDB_Raw | 2:00 AM UTC | Bronze layer from TimescaleDB |
-| WakeCapDW_Silver_TimescaleDB | 3:00 AM UTC | Silver layer transformations |
-| Gold Layer (Future) | 4:00 AM UTC | Gold layer views |
+| Job | Job ID | Schedule | Purpose |
+|-----|--------|----------|---------|
+| WakeCapDW_Bronze_TimescaleDB_Raw | 28181369160316 | 2:00 AM UTC | Bronze layer from TimescaleDB |
+| WakeCapDW_Silver_TimescaleDB | 181959206191493 | 3:00 AM UTC | Silver layer transformations |
+| WakeCapDW_Gold | 933934272544045 | 5:30 AM UTC | Gold layer facts |
+
+**⚠️ All future work must be added to one of these three jobs. Do not create new standalone jobs.**
 
 ---
 
@@ -808,6 +897,11 @@ For issues with this migration:
 
 | Date | Update |
 |------|--------|
+| 2026-01-27 | **Gold layer DEPLOYED** - Job ID 933934272544045 with 7 tasks |
+| 2026-01-27 | **IMPORTANT:** Added Production Jobs section - all work must go to Bronze/Silver/Gold jobs |
+| 2026-01-27 | Consolidated gold notebooks into single WakeCapDW_Gold job |
+| 2026-01-27 | Added silver_manager_assignments task to Silver job (9 tasks total) |
+| 2026-01-27 | Deleted temporary SP_Migration_All_Layers jobs |
 | 2026-01-24 | **Silver layer DEPLOYED** - Added Phase 2 with Job ID 181959206191493 |
 | 2026-01-24 | Added Silver job structure (8 tasks, 77 tables) |
 | 2026-01-24 | Updated data flow diagram with Silver layer details |
@@ -816,4 +910,4 @@ For issues with this migration:
 | 2026-01-22 | Phase 1 (Bronze Layer) marked COMPLETE - 78 tables loaded |
 | 2026-01-22 | Updated TimescaleDB ingestion documentation |
 
-*Last updated: 2026-01-24*
+*Last updated: 2026-01-27*

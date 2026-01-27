@@ -2,6 +2,22 @@
 
 This guide walks through a complete migration from Microsoft SQL Server to Databricks Delta Live Tables (DLT) using Lakebridge's AI-powered workflow.
 
+---
+
+## ⚠️ WakeCapDW Production Jobs
+
+For the WakeCapDW migration specifically, **all work must be added to these three production jobs:**
+
+| Job Name | Job ID | Purpose | Schedule |
+|----------|--------|---------|----------|
+| **WakeCapDW_Bronze_TimescaleDB_Raw** | 28181369160316 | Bronze layer ingestion | 2:00 AM UTC |
+| **WakeCapDW_Silver_TimescaleDB** | 181959206191493 | Silver transformations | 3:00 AM UTC |
+| **WakeCapDW_Gold** | 933934272544045 | Gold facts | 5:30 AM UTC |
+
+See `migration_project/DEPLOYMENT_GUIDE.md` for WakeCapDW-specific details.
+
+---
+
 ## Prerequisites
 
 - Databricks workspace with Unity Catalog enabled
