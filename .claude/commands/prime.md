@@ -16,6 +16,7 @@ git ls-files
 - @migration_project\assessment\migration_assessment.md
 - @migration_project\MIGRATION_STATUS.md
 - @.claude/commands/experts/databricks.md
+- @~/.databricks/labs/lakebridge/.credentials.yml
 
 ## Report
 Summarize your understanding of the codebase.

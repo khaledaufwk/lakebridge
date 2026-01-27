@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:adb-3022397433351638.18.azuredatabricks.net)"
+      "WebFetch(domain:adb-3022397433351638.18.azuredatabricks.net)",
+      "WebFetch(domain:wakecap.slack.com)"
     ]
   }
 }

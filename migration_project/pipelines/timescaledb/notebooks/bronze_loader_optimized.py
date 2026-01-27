@@ -1,9 +1,12 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Bronze Layer Loader - Optimized Version 2.0
+# MAGIC # Bronze Layer Loader - Optimized Version 2.2
 # MAGIC
 # MAGIC Enhanced loader with:
+# MAGIC - **Parallel loading** - Load multiple tables concurrently (4 workers default)
 # MAGIC - **GREATEST watermark expressions** for comprehensive change tracking
+# MAGIC - **Append-only mode** for hypertables (DeviceLocation, etc.) - 3-4x faster
+# MAGIC - **Optimized batch sizes** for large tables (100K-500K rows per batch)
 # MAGIC - **Proper geometry handling** with ST_AsText conversion
 # MAGIC - **Retry logic** for transient failures
 # MAGIC - **Excluded tables** for complex JSON/binary types
@@ -13,7 +16,7 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install /Volumes/wakecap_prod/migration/libs/timescaledb_loader-2.0.0-py3-none-any.whl --quiet
+# MAGIC %pip install /Volumes/wakecap_prod/migration/libs/timescaledb_loader-2.2.0-py3-none-any.whl --quiet
 
 # COMMAND ----------
 
@@ -60,6 +63,8 @@ dbutils.widgets.dropdown("category", "ALL", ["ALL", "dimensions", "assignments",
 dbutils.widgets.text("batch_size", "100000", "Batch Size")
 dbutils.widgets.text("fetch_size", "50000", "JDBC Fetch Size")
 dbutils.widgets.text("max_tables", "0", "Max Tables (0=all)")
+dbutils.widgets.dropdown("parallel", "true", ["true", "false"], "Parallel Loading")
+dbutils.widgets.text("max_workers", "4", "Parallel Workers")
 
 # Get widget values
 load_mode = dbutils.widgets.get("load_mode")
@@ -67,6 +72,8 @@ category = dbutils.widgets.get("category")
 batch_size = int(dbutils.widgets.get("batch_size"))
 fetch_size = int(dbutils.widgets.get("fetch_size"))
 max_tables = int(dbutils.widgets.get("max_tables"))
+parallel = dbutils.widgets.get("parallel").lower() == "true"
+max_workers = int(dbutils.widgets.get("max_workers"))
 
 force_full_load = (load_mode == "full")
 category_filter = None if category == "ALL" else category
@@ -75,6 +82,7 @@ print(f"Load Mode: {load_mode}")
 print(f"Category: {category}")
 print(f"Batch Size: {batch_size:,}")
 print(f"Fetch Size: {fetch_size:,}")
+print(f"Parallel Loading: {parallel} (workers: {max_workers})")
 
 # COMMAND ----------
 
@@ -153,16 +161,18 @@ for t in excluded_tables:
 
 # Load tables
 print("=" * 70)
-print("Starting optimized table load...")
+print(f"Starting optimized table load (parallel={parallel}, workers={max_workers})...")
 print("=" * 70)
 
 results = loader.load_all_tables(
     registry_path=REGISTRY_PATH,
     category_filter=category_filter,
-    force_full_load=force_full_load
+    force_full_load=force_full_load,
+    parallel=parallel,
+    max_workers=max_workers
 )
 
-# Apply max_tables limit if specified
+# Apply max_tables limit if specified (note: this is applied after loading for parallel mode)
 if max_tables > 0:
     results = results[:max_tables]
 

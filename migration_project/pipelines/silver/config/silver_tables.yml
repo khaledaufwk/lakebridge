@@ -132,8 +132,8 @@ processing_groups:
       - silver_fact_plan_progress_delay
       - silver_fact_plan_progress_resource
       - silver_fact_sgs_attendance
-      - silver_fact_sgs_roster
-      - silver_fact_workshifts_cache
+      # - silver_fact_sgs_roster        # EXCLUDED: Bronze source disabled (71M rows, no Gold dependencies)
+      # - silver_fact_workshifts_cache  # EXCLUDED: Bronze source disabled (9.5M rows, redundant cache)
       - silver_fact_novade_work_permit
 
   - group: history
@@ -2305,12 +2305,14 @@ tables:
       - source: UpdatedAt
         target: UpdatedAt
 
+  # EXCLUDED: Bronze source disabled for performance optimization
   - name: silver_fact_sgs_roster
     source_bronze_table: timescale_sgsrosterworkshiftlog
     primary_key_columns: [Id]
     processing_group: facts
     transformation_type: fact_transform
-    comment: "Large table - 68M rows. No ProjectId - linked via PeopleCode"
+    enabled: false  # EXCLUDED: 71M rows, no Gold layer dependencies
+    comment: "EXCLUDED - Large table (71M rows). Bronze source disabled. Load on-demand if needed."
     batch_size: 1000000
     expectations:
       critical:
@@ -2339,12 +2341,14 @@ tables:
       - source: UpdatedAt
         target: UpdatedAt
 
+  # EXCLUDED: Bronze source disabled for performance optimization
   - name: silver_fact_workshifts_cache
     source_bronze_table: timescale_viewfactworkshiftscache
-    primary_key_columns: [ExtWorkerID, ShiftLocalDate, ProjectId]
+    primary_key_columns: [ProjectId, ExtWorkerID, ShiftLocalDate]  # Fixed column order
     processing_group: facts
     transformation_type: fact_transform
-    comment: "Pre-aggregated workshift cache"
+    enabled: false  # EXCLUDED: 9.5M rows, redundant with Gold calculations
+    comment: "EXCLUDED - Pre-computed cache (9.5M rows). Bronze source disabled. Load on-demand if needed."
     batch_size: 500000
     fk_validations:
       - column: ProjectId

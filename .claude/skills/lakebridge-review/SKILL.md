@@ -297,11 +297,52 @@ Verdict: FAIL
 Recommended: Run lakebridge-fix skill to address blockers
 ```
 
+## Stored Procedure Migration Review
+
+This skill includes comprehensive capabilities for reviewing T-SQL to Databricks stored procedure migrations.
+
+### SP Migration Review Workflow
+
+1. **Pattern Detection** - Identify T-SQL patterns (CURSOR, MERGE, temp tables, spatial)
+2. **Conversion Validation** - Verify all patterns are converted
+3. **Business Logic Comparison** - Compare source and target logic
+4. **Dependency Tracking** - Identify and resolve missing dependencies
+5. **Data Type Validation** - Verify type mappings
+6. **Checklist Generation** - Create procedure-specific review checklists
+7. **Report Generation** - Produce comprehensive review reports
+
+### SP Review Checklist
+
+**Pattern Conversion:**
+- [ ] CURSOR patterns → Window functions (lag/lead/row_number)
+- [ ] MERGE statements → DeltaTable.merge()
+- [ ] Temp tables (#temp) → createOrReplaceTempView()
+- [ ] Spatial functions → H3/Haversine UDFs
+
+**Business Logic:**
+- [ ] All input tables read in target
+- [ ] All output tables written
+- [ ] Aggregations match
+- [ ] Join conditions preserved
+- [ ] Filter conditions equivalent
+
+**Dependencies:**
+- [ ] All table dependencies resolved
+- [ ] Procedure call chain converted
+- [ ] UDFs registered for function dependencies
+- [ ] Views converted or inlined
+
+**Data Types:**
+- [ ] VARCHAR/NVARCHAR → STRING
+- [ ] DECIMAL precision preserved
+- [ ] DATETIME → TIMESTAMP
+- [ ] GEOGRAPHY → STRING (WKT) + H3
+
 ## Scripts
 
 This skill includes Python scripts for code analysis:
 
-### analyzer.py
+### Core Analysis (analyzer.py)
 
 ```python
 from scripts.analyzer import CodeAnalyzer, ReviewReport, RiskTier
@@ -335,4 +376,121 @@ report = analyzer.create_report(
 filepath = report.save("app_review/")
 print(f"Verdict: {report.verdict}")
 print(f"Blockers: {len(report.blockers)}")
+```
+
+### Business Logic Comparison (Phase 3)
+
+```python
+from scripts.analyzer_business_logic import BusinessLogicComparator
+
+comparator = BusinessLogicComparator(table_mapping={
+    "dbo.Worker": "wakecap_prod.silver.silver_worker",
+    "dbo.Project": "wakecap_prod.silver.silver_project",
+})
+
+# Compare source T-SQL with target Spark
+result = comparator.compare(
+    source_sql=tsql_content,
+    target_notebook=notebook_content,
+    procedure_name="stg.spCalculateMetrics"
+)
+
+print(f"Verdict: {result['verdict']}")
+print(f"Issues: {len(result['comparisons'])}")
+print(comparator.extractor.compare_logic_report(result))
+```
+
+### Dependency Tracking (Phase 3)
+
+```python
+from scripts.analyzer_dependencies import DependencyAnalyzer
+
+analyzer = DependencyAnalyzer(
+    catalog="wakecap_prod",
+    table_mapping={"dbo.Worker": "wakecap_prod.silver.silver_worker"}
+)
+
+# Analyze dependencies
+result = analyzer.analyze(
+    source_sql=tsql_content,
+    procedure_name="stg.spMyProcedure",
+    existing_tables={"wakecap_prod.silver.silver_worker"}
+)
+
+print(f"Readiness: {result['readiness_percentage']:.0f}%")
+print(f"Blockers: {result['blockers']}")
+print(f"Can convert: {result['can_convert']}")
+```
+
+### Data Type Validation (Phase 4)
+
+```python
+from scripts.datatype_validator import DataTypeValidator
+
+validator = DataTypeValidator()
+
+# Extract and validate types
+result = validator.validate_all_types(
+    source_sql=tsql_content,
+    target_notebook=notebook_content
+)
+
+print(f"Verdict: {result['verdict']}")
+print(f"Errors: {result['error_count']}")
+print(f"Warnings: {result['warning_count']}")
+
+# Generate report
+report = validator.generate_report(result)
+print(report)
+```
+
+### Checklist Generation (Phase 4)
+
+```python
+from scripts.checklist_generator import SPChecklistGenerator, SPChecklistConfig
+
+generator = SPChecklistGenerator()
+
+# Generate from analysis results
+checklist = generator.generate_from_analysis(
+    procedure_name="stg.spCalculateMetrics",
+    source_sql=tsql_content,
+    target_notebook=notebook_content,
+    conversion_result=conversion_result,
+    dependency_analysis=dependency_result,
+    business_logic_comparison=logic_result,
+)
+
+print(checklist)
+
+# Quick checklists for common patterns
+from scripts.checklist_generator import QuickChecklist
+print(QuickChecklist.for_cursor_conversion("my_proc"))
+print(QuickChecklist.for_merge_conversion("my_proc"))
+```
+
+### Enhanced Report Generation (Phase 4)
+
+```python
+from scripts.enhanced_report import ReportBuilder
+
+builder = ReportBuilder("stg.spCalculateMetrics")
+builder.set_summary("Reviewed stored procedure conversion")
+builder.set_source_info("sql/stg.spCalculateMetrics.sql", 250)
+builder.set_target_info("notebooks/calc_metrics.py", 180)
+builder.set_conversion_score(0.85)
+builder.set_complexity_score(6)
+
+# Add pattern status
+builder.add_pattern("CURSOR", source_count=2, target_count=2, converted=True)
+builder.add_pattern("TEMP_TABLE", source_count=3, target_count=3, converted=True)
+
+# Add dependencies
+builder.add_dependency("dbo.Worker", "TABLE_READ", is_resolved=True,
+                       databricks_equivalent="silver.silver_worker")
+
+# Build and save
+report = builder.build()
+report.save("app_review/sp_review_report.md")
+print(f"Verdict: {report.verdict}")
 ```

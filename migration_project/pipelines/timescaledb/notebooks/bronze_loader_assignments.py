@@ -1,6 +1,9 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # Bronze Layer Loader - Assignment Tables
+# MAGIC # Bronze Layer Loader - Assignment Tables (DEPRECATED)
+# MAGIC
+# MAGIC **⚠️ DEPRECATED:** Use `bronze_loader_optimized` instead for all table loading.
+# MAGIC This notebook uses the old v1 loader. The main job now uses bronze_loader_optimized with v2 config.
 # MAGIC
 # MAGIC Loads assignment/bridge tables from TimescaleDB using incremental watermark-based extraction.
 # MAGIC

@@ -397,11 +397,37 @@ Status: PARTIAL
 Next Steps: Contact Azure admin for firewall configuration
 ```
 
+## Stored Procedure Conversion
+
+This skill includes comprehensive capabilities for converting T-SQL stored procedures to Databricks notebooks.
+
+### SP Conversion Workflow
+
+1. **Pattern Detection** - Identify T-SQL patterns requiring conversion
+2. **CURSOR Conversion** - Transform to Window functions
+3. **MERGE Generation** - Create Delta MERGE operations
+4. **Temp Table Conversion** - Convert to Spark temp views
+5. **Spatial Function Stubs** - Generate H3/UDF placeholders
+6. **Dependency Resolution** - Create missing tables/UDFs
+7. **Validation Generation** - Create test notebooks
+
+### SP Conversion Patterns
+
+| T-SQL Pattern | Spark Equivalent |
+|--------------|------------------|
+| CURSOR iteration | Window functions (lag/lead/row_number) |
+| MERGE INTO | DeltaTable.merge() |
+| #TempTable | createOrReplaceTempView() |
+| ##GlobalTemp | Delta table or cached DataFrame |
+| geography::Point | (lat, lon) columns + H3 index |
+| STDistance | Haversine UDF |
+| EXEC @dynamic | Parameterized f-string queries |
+
 ## Scripts
 
 This skill includes Python scripts for automated fixes:
 
-### fixer.py
+### Core Fixer (fixer.py)
 
 ```python
 from scripts.fixer import IssueFixer
@@ -439,4 +465,211 @@ action = fixer.fix_pipeline_serverless(
 result = fixer.get_result()
 filepath = result.save("app_fix_reports/")
 print(f"Fixed {result.total_fixed} issues")
+```
+
+### SP Converter (Phase 1)
+
+```python
+from scripts.sp_converter import SPConverter
+
+converter = SPConverter()
+
+# Convert a stored procedure to Databricks notebook
+result = converter.convert(
+    source_sql=tsql_content,
+    procedure_name="stg.spCalculateMetrics",
+    target_catalog="wakecap_prod",
+    target_schema="gold",
+    source_tables_mapping={
+        "dbo.Worker": "wakecap_prod.silver.silver_worker",
+        "dbo.Project": "wakecap_prod.silver.silver_project",
+    }
+)
+
+if result.success:
+    print(f"Converted {result.procedure_name}")
+    print(f"Patterns converted: {result.patterns_converted}")
+    print(f"Manual review needed: {result.patterns_manual}")
+
+    # Write notebook
+    with open(result.target_path, "w") as f:
+        f.write(result.notebook_content)
+```
+
+### CURSOR to Window Converter (Phase 1)
+
+```python
+from scripts.sp_converter import CursorConverter
+
+converter = CursorConverter()
+
+# Convert CURSOR pattern to Window function
+cursor_sql = """
+DECLARE worker_cursor CURSOR FOR
+    SELECT WorkerId, TimestampUTC FROM FactWorkersHistory
+    ORDER BY WorkerId, TimestampUTC
+...
+"""
+
+converted, warnings = converter.convert(
+    cursor_sql=cursor_sql,
+    context={
+        "partition_cols": ["WorkerId"],
+        "order_cols": ["TimestampUTC"],
+        "timestamp_col": "TimestampUTC",
+        "gap_threshold": 300
+    }
+)
+
+print(converted)  # Spark Window function code
+```
+
+### Temp Table Converter (Phase 2)
+
+```python
+from scripts.temp_converter import TempTableConverter
+
+converter = TempTableConverter()
+
+# Detect and convert temp tables
+temp_tables = converter.detect_temp_tables(source_sql)
+for temp in temp_tables:
+    print(f"Found {temp['name']}, used {temp['usage_count']} times")
+
+# Convert all temp tables
+converted_code = converter.convert_all(
+    source_sql,
+    cache_threshold=2  # Cache if used more than twice
+)
+```
+
+### Spatial Function Converter (Phase 2)
+
+```python
+from scripts.spatial_converter import SpatialConverter
+
+converter = SpatialConverter()
+
+# Detect spatial functions
+spatial_funcs = converter.detect_spatial_functions(source_sql)
+for func in spatial_funcs:
+    print(f"Found {func['function']} at line {func['line']}")
+
+# Generate conversion stubs
+stubs = converter.convert(source_sql, {})
+print(stubs)  # H3 setup + Haversine UDF + usage examples
+```
+
+### Dependency Resolver (Phase 3)
+
+```python
+from scripts.dependency_resolver import DependencyResolver
+
+resolver = DependencyResolver(
+    catalog="wakecap_prod",
+    dry_run=False
+)
+
+# Set existing tables
+resolver.set_existing_tables({
+    "wakecap_prod.silver.silver_worker",
+    "wakecap_prod.silver.silver_project",
+})
+
+# Resolve dependencies
+dependencies = [
+    {"target_object": "dbo.Worker", "dependency_type": "reads"},
+    {"target_object": "dbo.Project", "dependency_type": "reads"},
+    {"target_object": "dbo.fnCalcTime", "dependency_type": "uses_function"},
+]
+
+actions = resolver.resolve_all(dependencies, auto_create=True)
+
+# Generate setup notebook
+setup_notebook = resolver.generate_setup_notebook(actions)
+
+# Generate report
+report = resolver.generate_resolution_report(actions)
+print(report)
+```
+
+### Validation Notebook Generator (Phase 2/3)
+
+```python
+from scripts.validation_generator import ValidationNotebookGenerator, ValidationConfig
+
+generator = ValidationNotebookGenerator()
+
+config = ValidationConfig(
+    procedure_name="stg.spCalculateMetrics",
+    source_table="wakecap_prod.silver.silver_fact_workers",
+    target_table="wakecap_prod.gold.gold_fact_summary",
+    key_columns=["ProjectId", "WorkerId", "ShiftLocalDate"],
+    aggregation_columns=["ActiveTime", "InactiveTime", "TotalTime"],
+    date_column="ShiftLocalDate",
+    sample_size=100,
+    tolerance_percent=0.01,
+    # Phase 3 enhancements
+    categorical_columns=["WorkerType", "ProjectStatus"],
+    foreign_key_checks=[
+        {"column": "project_id", "ref_table": "silver.dim_project", "ref_column": "project_id"}
+    ],
+    include_profiling=True,
+    include_freshness=True,
+)
+
+notebook = generator.generate(config)
+
+# Or generate comprehensive validation with all Phase 3 integration
+notebook = generator.generate_comprehensive_validation(
+    procedure_name="stg.spCalculateMetrics",
+    source_sql=tsql_content,
+    target_notebook=converted_notebook,
+    source_table="silver.source_table",
+    target_table="gold.target_table",
+    dependencies=dependency_analysis_result,
+    business_logic_comparison=logic_comparison_result,
+)
+```
+
+### Complete SP Migration Workflow
+
+```python
+from scripts.sp_converter import SPConverter
+from scripts.dependency_resolver import DependencyResolver
+from scripts.validation_generator import ValidationNotebookGenerator
+
+# 1. Convert the stored procedure
+converter = SPConverter()
+conversion_result = converter.convert(
+    source_sql=tsql_content,
+    procedure_name="stg.spCalculateMetrics",
+    target_catalog="wakecap_prod",
+    target_schema="gold"
+)
+
+# 2. Resolve dependencies
+resolver = DependencyResolver(catalog="wakecap_prod")
+actions = resolver.resolve_all(
+    conversion_result.get("dependencies", []),
+    auto_create=True
+)
+
+# 3. Generate validation notebook
+generator = ValidationNotebookGenerator()
+validation_notebook = generator.generate_from_conversion(
+    procedure_name="stg.spCalculateMetrics",
+    source_table="silver.fact_workers",
+    target_table="gold.gold_fact_summary"
+)
+
+# 4. Save outputs
+with open("notebooks/calc_metrics.py", "w") as f:
+    f.write(conversion_result.notebook_content)
+
+with open("notebooks/validate_calc_metrics.py", "w") as f:
+    f.write(validation_notebook)
+
+print(f"Conversion score: {conversion_result.conversion_score:.0%}")
+print(f"Dependencies resolved: {len([a for a in actions if a.action.value == 'exists'])}")
 ```

@@ -304,6 +304,13 @@ These tables were intentionally excluded due to complex JSON/binary data:
 | `notebooks/merge_old_data.py` | mrg.spMergeOldData | 454 |
 | `notebooks/update_workers_history_location_class.py` | stg.spWorkersHistory_UpdateAssignments_3_LocationClass | 554 |
 
+### Gold Layer Notebooks (Converted from Stored Procedures)
+
+| Notebook | Source Procedure | Lines | Patterns |
+|----------|------------------|-------|----------|
+| `gold/notebooks/gold_fact_workers_history.py` | stg.spDeltaSyncFactWorkersHistory | 783 | TEMP_TABLE, MERGE, UDFs, Spatial |
+| `gold/notebooks/gold_manager_assignment_snapshots.py` | stg.spCalculateManagerAssignmentSnapshots | 266 | RECURSIVE CTE, PIVOT, Two-phase MERGE |
+
 ### Validation
 
 | File | Purpose |
@@ -358,8 +365,9 @@ All views converted to DLT views in `gold_views.py`:
 | stg.spCalculateFactWorkersContacts_ByRule | 951 | `calc_worker_contacts.py` |
 | mrg.spMergeOldData | 903 | `merge_old_data.py` |
 | stg.spWorkersHistory_UpdateAssignments_3_LocationClass | 553 | `update_workers_history_location_class.py` |
-| stg.spDeltaSyncFactWorkersHistory | 1561 | `streaming_facts.py` (workers_history_cdc) |
+| stg.spDeltaSyncFactWorkersHistory | 1561 | `gold_fact_workers_history.py` |
 | stg.spDeltaSyncFactObservations | 1165 | `streaming_facts.py` (observations_cdc) |
+| stg.spCalculateManagerAssignmentSnapshots | 266 | `gold_manager_assignment_snapshots.py` |
 
 ### Functions (23 Total) - 100% CONVERTED
 

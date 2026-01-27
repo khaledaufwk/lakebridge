@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime, timezone
 from enum import Enum
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import yaml
 import json
 import logging
@@ -74,6 +75,7 @@ class TableConfigV2:
     has_geometry: bool = False
     geometry_columns: Optional[List[str]] = None
     comment: Optional[str] = None
+    is_append_only: bool = False  # NEW: Skip MERGE for append-only tables (e.g., DeviceLocation)
 
     @property
     def full_source_name(self) -> str:
@@ -126,6 +128,7 @@ class TableConfigV2:
             has_geometry=config.get("has_geometry", False),
             geometry_columns=geometry_cols if geometry_cols else None,
             comment=config.get("comment"),
+            is_append_only=config.get("is_append_only", False),
         )
 
 
@@ -401,6 +404,10 @@ class TimescaleDBLoaderV2:
         retry_delay: int = 5,
     ):
         self.spark = spark
+
+        # Enable schema auto-merge to handle column additions/changes
+        spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", "true")
+
         self.credentials = credentials
         self.target_catalog = target_catalog
         self.target_schema = target_schema
@@ -603,7 +610,7 @@ class TimescaleDBLoaderV2:
         df: DataFrame,
         table_config: TableConfigV2
     ) -> int:
-        """Write to Delta with merge for deduplication."""
+        """Write to Delta with merge for deduplication, or append for append-only tables."""
         table_name = f"{self.table_prefix}{table_config.source_table}".lower()
         target_table = f"{self.target_catalog}.{self.target_schema}.{table_name}"
 
@@ -634,6 +641,13 @@ class TimescaleDBLoaderV2:
                     'source_table' = '{table_config.full_source_name}'
                 )
             """)
+        elif table_config.is_append_only:
+            # OPTIMIZATION: Use APPEND mode for append-only tables (e.g., DeviceLocation)
+            # This is much faster than MERGE since we skip the expensive join/deduplication
+            # Safe for hypertables where data is only inserted, never updated
+            logger.info(f"Appending {row_count} rows to {target_table} (append-only mode)")
+
+            df.write.format("delta").mode("append").saveAsTable(target_table)
         else:
             logger.info(f"Merging {row_count} rows into {target_table}")
 
@@ -801,9 +815,23 @@ class TimescaleDBLoaderV2:
         registry_path: str,
         category_filter: Optional[str] = None,
         table_filter: Optional[List[str]] = None,
-        force_full_load: bool = False
+        force_full_load: bool = False,
+        parallel: bool = True,
+        max_workers: int = 4
     ) -> List[LoadResult]:
-        """Load all tables from registry."""
+        """Load all tables from registry.
+
+        Args:
+            registry_path: Path to the YAML/JSON registry file
+            category_filter: Optional category to filter tables (e.g., 'dimensions', 'facts')
+            table_filter: Optional list of specific table names to load
+            force_full_load: If True, ignore watermarks and do full load
+            parallel: If True, load tables in parallel using ThreadPoolExecutor
+            max_workers: Number of parallel workers (default 4)
+
+        Returns:
+            List of LoadResult objects for each table
+        """
 
         table_configs = self.load_registry(registry_path)
 
@@ -815,12 +843,49 @@ class TimescaleDBLoaderV2:
 
         table_configs = [t for t in table_configs if t.enabled]
 
-        logger.info(f"Loading {len(table_configs)} tables")
+        logger.info(f"Loading {len(table_configs)} tables (parallel={parallel}, workers={max_workers})")
 
         results = []
-        for config in table_configs:
-            result = self.load_table(config, force_full_load=force_full_load)
-            results.append(result)
+
+        if parallel and len(table_configs) > 1:
+            # OPTIMIZATION: Parallel loading using ThreadPoolExecutor
+            # This significantly reduces wall-clock time by loading multiple tables concurrently
+            logger.info(f"Starting parallel load with {max_workers} workers...")
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all tasks
+                future_to_config = {
+                    executor.submit(self.load_table, config, force_full_load): config
+                    for config in table_configs
+                }
+
+                # Collect results as they complete
+                completed = 0
+                for future in as_completed(future_to_config):
+                    config = future_to_config[future]
+                    try:
+                        result = future.result()
+                        results.append(result)
+                        completed += 1
+
+                        # Log progress
+                        status_emoji = "✓" if result.status == LoadStatus.SUCCESS else "✗" if result.status == LoadStatus.FAILED else "○"
+                        logger.info(f"[{completed}/{len(table_configs)}] {status_emoji} {config.source_table}: {result.rows_loaded} rows in {result.duration_seconds:.1f}s")
+
+                    except Exception as e:
+                        logger.error(f"Exception loading {config.source_table}: {e}")
+                        results.append(LoadResult(
+                            table_config=config,
+                            status=LoadStatus.FAILED,
+                            rows_loaded=0,
+                            error_message=str(e)
+                        ))
+        else:
+            # Sequential loading (original behavior)
+            for i, config in enumerate(table_configs):
+                result = self.load_table(config, force_full_load=force_full_load)
+                results.append(result)
+                logger.info(f"[{i+1}/{len(table_configs)}] {config.source_table}: {result.status.value}")
 
         # Summary
         success = sum(1 for r in results if r.status == LoadStatus.SUCCESS)
@@ -828,7 +893,7 @@ class TimescaleDBLoaderV2:
         skipped = sum(1 for r in results if r.status == LoadStatus.SKIPPED)
         total_rows = sum(r.rows_loaded for r in results)
 
-        logger.info(f"Complete: {success} success, {failed} failed, {skipped} skipped, {total_rows} rows")
+        logger.info(f"Complete: {success} success, {failed} failed, {skipped} skipped, {total_rows:,} rows")
 
         return results
 
@@ -845,11 +910,21 @@ class TimescaleDBLoaderV2:
         tables = registry.get("tables", [])
         excluded = registry.get("excluded_tables", [])
 
-        # Build excluded set
+        # Build excluded set with reasons
         excluded_names = {t.get("source_table") for t in excluded}
+        excluded_reasons = {t.get("source_table"): t.get("reason", "No reason specified") for t in excluded}
 
-        return [
+        # Log excluded tables
+        if excluded_names:
+            logger.info(f"Excluding {len(excluded_names)} tables from loading:")
+            for table_name in sorted(excluded_names):
+                logger.info(f"  - {table_name}: {excluded_reasons.get(table_name, 'N/A')}")
+
+        result = [
             TableConfigV2.from_dict(table_data, defaults)
             for table_data in tables
             if table_data.get("source_table") not in excluded_names
         ]
+
+        logger.info(f"Loaded {len(result)} table configurations (excluded {len(excluded_names)})")
+        return result

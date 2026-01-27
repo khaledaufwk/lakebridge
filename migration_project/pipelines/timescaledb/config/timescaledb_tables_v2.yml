@@ -1,6 +1,7 @@
-# TimescaleDB Table Registry - Version 2.0 (Optimized)
+# TimescaleDB Table Registry - Version 2.2 (Performance Optimized)
 # ================================================
 # Generated: 2026-01-21
+# Updated: 2026-01-26
 # Source: wakecap_app database
 #
 # IMPROVEMENTS IN THIS VERSION:
@@ -8,9 +9,12 @@
 # 2. Excludes tables with complex JSON/binary data types
 # 3. Properly handles geometry columns with ST_AsText
 # 4. Optimized batch sizes for large tables
+# 5. [2.2] Append-only mode for insert-only hypertables (DeviceLocation, etc.)
+# 6. [2.2] Optimized batch/fetch sizes for large tables (3M+ rows)
+# 7. [2.2] Parallel loading support in loader
 # ================================================
 
-registry_version: '2.1'
+registry_version: '2.2'
 source_system: timescaledb
 source_database: wakecap_app
 target_catalog: wakecap_prod
@@ -41,9 +45,14 @@ metadata_columns:
     expression: source_table_name
 
 # ============================================
-# EXCLUDED TABLES (complex JSON/binary types)
+# EXCLUDED TABLES
 # ============================================
+# Two categories of exclusions:
+# 1. Complex JSON/binary types - not suitable for analytics
+# 2. Performance optimization - large tables with no Gold layer dependencies
+#
 excluded_tables:
+  # --- Complex JSON/Binary Types ---
   - source_table: AuditTrail
     reason: "Contains complex JSON in Changes column - audit/logging table, not needed for analytics"
     enabled: false
@@ -62,6 +71,20 @@ excluded_tables:
 
   - source_table: BulkUploadBatch
     reason: "Contains binary file data and complex JSON"
+    enabled: false
+
+  # --- Performance Optimization (Large tables, no Gold dependencies) ---
+  # These tables can be loaded on-demand using a separate job if needed
+  - source_table: SGSRosterWorkshiftLog
+    reason: "71M rows, 17GB - External SGS roster data, no Gold layer dependencies. Saves ~25 min/run."
+    rows: 71000000
+    size_gb: 17
+    enabled: false
+
+  - source_table: ViewFactWorkshiftsCache
+    reason: "9.5M rows, 2.7GB - Pre-computed cache, redundant with Gold calculations. Saves ~5 min/run."
+    rows: 9500000
+    size_gb: 2.7
     enabled: false
 
 # ============================================
@@ -339,11 +362,16 @@ tables:
     watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
     category: assignments
 
+  # ManualLocationAssignment - Large assignment table (1.4M+ rows)
   - source_table: ManualLocationAssignment
     primary_key_columns: [Id]
     watermark_column: UpdatedAt
     watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
     category: assignments
+    fetch_size: 50000
+    batch_size: 200000
+    is_full_load: false
+    comment: "Large assignment table - 1.4M rows"
 
   - source_table: PermitActivity
     primary_key_columns: [Id]
@@ -375,11 +403,16 @@ tables:
     watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
     category: assignments
 
+  # TrainingSessionTrainee - Large assignment table (337K+ rows)
   - source_table: TrainingSessionTrainee
     primary_key_columns: [Id]
     watermark_column: UpdatedAt
     watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
     category: assignments
+    fetch_size: 50000
+    batch_size: 200000
+    is_full_load: false
+    comment: "Large assignment table - 337K rows"
 
   - source_table: WorkPermit
     primary_key_columns: [Id]
@@ -393,11 +426,16 @@ tables:
     watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
     category: assignments
 
+  # WorkshiftResourceAssignment - Large assignment table (3.4M+ rows)
+  # OPTIMIZATION: Increased batch/fetch sizes for faster loading
   - source_table: WorkshiftResourceAssignment
     primary_key_columns: [Id]
     watermark_column: UpdatedAt
     watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
     category: assignments
+    fetch_size: 100000
+    batch_size: 200000
+    comment: "Large table - 3.4M rows, optimized batch sizes"
 
   - source_table: ZoneAuthorizedResource
     primary_key_columns: [Id]
@@ -406,6 +444,7 @@ tables:
     category: assignments
 
   # --- Fact Tables (Large, with optimized settings) ---
+  # AttendanceReportConsalidatedDay - Large fact table (85K+ rows)
   - source_table: AttendanceReportConsalidatedDay
     primary_key_columns: [Id]
     watermark_column: UpdatedAt
@@ -413,6 +452,8 @@ tables:
     category: facts
     fetch_size: 50000
     batch_size: 200000
+    is_full_load: false
+    comment: "Large fact table - 85K rows, incremental loading"
 
   - source_table: Co2Inspection
     primary_key_columns: [Id]
@@ -423,6 +464,7 @@ tables:
   # DeviceLocation - Large hypertable (82M rows, 52GB)
   # Partitioned by GeneratedAt (14-day chunks)
   # Note: UpdatedAt is NULL for all rows, so we use GeneratedAt directly
+  # OPTIMIZATION: Using append-only mode since this is an insert-only hypertable
   - source_table: DeviceLocation
     primary_key_columns: [DeviceId, ProjectId, ActiveSequance, InactiveSequance, GeneratedAt]
     watermark_column: GeneratedAt
@@ -433,10 +475,12 @@ tables:
     fetch_size: 100000
     batch_size: 500000
     is_hypertable: true
-    comment: "Large hypertable - ~50M rows/month, partitioned by GeneratedAt"
+    is_append_only: true  # CRITICAL: Skip MERGE, use APPEND for ~4x faster loads
+    comment: "Large hypertable - ~50M rows/month, append-only (no updates)"
 
   # DeviceLocationSummary - Daily aggregated hypertable (848K rows, 3.8GB)
   # Partitioned by Day (30-day chunks)
+  # OPTIMIZATION: Using append-only mode since this is an insert-only hypertable
   - source_table: DeviceLocationSummary
     primary_key_columns: [Day, DeviceId, ProjectId]
     watermark_column: GeneratedAt
@@ -447,20 +491,25 @@ tables:
     fetch_size: 50000
     batch_size: 200000
     is_hypertable: true
-    comment: "Daily summary hypertable - ~400K rows/month"
+    is_append_only: true  # CRITICAL: Skip MERGE, use APPEND for faster loads
+    comment: "Daily summary hypertable - ~400K rows/month, append-only"
 
+  # EquipmentTelemetry - Large telemetry table (3M+ rows)
+  # FIXED: PK is composite (EquipmentId, Id) not just (Id)
   - source_table: EquipmentTelemetry
-    primary_key_columns: [Id]
+    primary_key_columns: [EquipmentId, Id]  # Correct composite PK from database
     watermark_column: CreatedAt
     category: facts
     fetch_size: 100000
     batch_size: 500000
     is_hypertable: true
+    is_append_only: true  # Telemetry data is insert-only
 
   - source_table: Inspection
     primary_key_columns: [Id]
     watermark_column: CreatedAt
     category: facts
+    is_append_only: true  # Uses only CreatedAt - insert-only pattern
 
   - source_table: Plan
     primary_key_columns: [Id]
@@ -498,25 +547,38 @@ tables:
     watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
     category: facts
 
+  # ResourceAttendance - Large fact table (1.4M+ rows)
+  # OPTIMIZATION: Increased batch/fetch sizes for faster loading
   - source_table: ResourceAttendance
     primary_key_columns: [Id]
     watermark_column: UpdatedAt
     watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
     category: facts
-    fetch_size: 50000
+    fetch_size: 100000
+    batch_size: 200000
+    comment: "Large table - 1.4M rows, optimized batch sizes"
 
+  # ResourceHours - Large fact table (3.3M+ rows)
+  # OPTIMIZATION: Increased batch/fetch sizes for faster loading
   - source_table: ResourceHours
     primary_key_columns: [Id]
     watermark_column: UpdatedAt
     watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
     category: facts
-    fetch_size: 50000
+    fetch_size: 100000
+    batch_size: 200000
+    comment: "Large table - 3.3M rows, optimized batch sizes"
 
+  # ResourceTimesheet - Large fact table (2.7M+ rows)
+  # OPTIMIZATION: Increased batch/fetch sizes for faster loading
   - source_table: ResourceTimesheet
     primary_key_columns: [Id]
     watermark_column: UpdatedAt
     watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
     category: facts
+    fetch_size: 100000
+    batch_size: 200000
+    comment: "Large table - 2.7M rows, optimized batch sizes"
 
   - source_table: ResourceZone
     primary_key_columns: [Id]
@@ -532,20 +594,35 @@ tables:
     watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
     category: facts
 
+  # SGSRosterWorkshiftLog - Large table (71M+ rows)
+  # EXCLUDED: No Gold layer dependencies, external SGS roster data
+  # Can be loaded on-demand if needed for roster reconciliation
+  # Savings: ~20-25 min per job run (largest table)
   - source_table: SGSRosterWorkshiftLog
     primary_key_columns: [Id]
     watermark_column: UpdatedAt
     watermark_expression: "GREATEST(COALESCE(\"CreatedAt\", '1900-01-01'), COALESCE(\"UpdatedAt\", '1900-01-01'))"
     category: facts
+    fetch_size: 100000
+    batch_size: 500000
+    is_full_load: false
+    enabled: false  # EXCLUDED - no Gold layer impact, 71M rows
+    comment: "EXCLUDED - Large table (71M rows), no Gold dependencies. Load on-demand if needed."
 
+  # ViewFactWorkshiftsCache - Pre-aggregated cache table (9.5M rows)
+  # EXCLUDED: Pre-computed cache, likely redundant with Gold layer calculations
+  # Can be loaded on-demand if needed for performance comparison
   - source_table: ViewFactWorkshiftsCache
-    primary_key_columns: [Id]
+    primary_key_columns: [ProjectId, ExtWorkerID, ShiftLocalDate]  # Fixed column order to match DB
     watermark_column: WatermarkUTC
     category: facts
     fetch_size: 100000
     batch_size: 500000
     is_hypertable: true
-    comment: "Pre-aggregated workshift facts - very large table"
+    is_full_load: false
+    is_append_only: true
+    enabled: false  # EXCLUDED - pre-computed cache, 9.5M rows
+    comment: "EXCLUDED - Pre-aggregated cache (9.5M rows), redundant with Gold layer. Load on-demand if needed."
 
   # --- History Tables (Geometry with ST_AsText) ---
   - source_table: SpaceHistory

@@ -1,0 +1,70 @@
+{
+  "workflow_id": "fact_obs_20260125",
+  "sp_name": "stg.spDeltaSyncFactObservations",
+  "sp_definition_path": "migration_project/source_sql/stored_procedures/stg.spDeltaSyncFactObservations.sql",
+  "phases": {
+    "plan": {
+      "status": "COMPLETED",
+      "session_id": "plan-aad3ed9",
+      "artifact_path": "specs/sp-delta-sync-fact-observations.md",
+      "started_at": "2026-01-25T10:00:00Z",
+      "completed_at": "2026-01-25T10:15:00Z"
+    },
+    "build": {
+      "status": "COMPLETED",
+      "session_id": "build-a26370f",
+      "artifact_path": "migration_project/pipelines/gold/notebooks/delta_sync_fact_observations.py",
+      "started_at": "2026-01-25T10:15:00Z",
+      "completed_at": "2026-01-25T10:45:00Z"
+    },
+    "review": {
+      "status": "COMPLETED",
+      "session_id": "review-a315a4d",
+      "artifact_path": "app_review/sp_review_delta_sync_fact_observations_20260125.md",
+      "verdict": "PASS",
+      "started_at": "2026-01-25T10:45:00Z",
+      "completed_at": "2026-01-25T11:00:00Z"
+    },
+    "fix": {
+      "status": "SKIPPED",
+      "reason": "Review passed with no blockers"
+    }
+  },
+  "overall_status": "SUCCESS",
+  "review_verdict": "PASS",
+  "artifacts": {
+    "source_sql": "migration_project/source_sql/stored_procedures/stg.spDeltaSyncFactObservations.sql",
+    "plan": "specs/sp-delta-sync-fact-observations.md",
+    "converted_notebook": "migration_project/pipelines/gold/notebooks/delta_sync_fact_observations.py",
+    "review_report": "app_review/sp_review_delta_sync_fact_observations_20260125.md",
+    "fix_report": null
+  },
+  "sp_analysis": {
+    "line_count": 585,
+    "patterns": ["TEMP_TABLE", "MERGE", "CTE", "WINDOW_FUNCTION", "CUSTOM_FUNCTION", "STALLED_RECORDS", "MULTI_DIMENSION_LOOKUP"],
+    "input_tables": 14,
+    "output_tables": 2,
+    "dimension_tables": 12,
+    "requires_manual_review": false
+  },
+  "conversion_metrics": {
+    "source_lines": 585,
+    "target_lines": 1296,
+    "patterns_converted": 7,
+    "dimension_joins": 12,
+    "column_mappings": 40
+  },
+  "issues_summary": {
+    "blocker": 0,
+    "high_risk": 1,
+    "medium_risk": 1,
+    "low_risk": 2,
+    "details": {
+      "high_risk": ["Missing CTE performance optimization for MERGE"],
+      "medium_risk": ["Hardcoded catalog/schema names"],
+      "low_risk": ["count() operations overhead", "Verbose logging"]
+    }
+  },
+  "started_at": "2026-01-25T10:00:00Z",
+  "completed_at": "2026-01-25T11:00:00Z"
+}

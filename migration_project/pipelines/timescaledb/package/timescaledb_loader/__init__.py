@@ -24,4 +24,4 @@ __all__ = [
     "WatermarkType",
 ]
 
-__version__ = "2.0.0"
+__version__ = "2.2.0"  # Added parallel loading, optimized batch sizes for large tables
