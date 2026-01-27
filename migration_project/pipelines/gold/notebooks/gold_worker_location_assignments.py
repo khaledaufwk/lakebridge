@@ -21,7 +21,7 @@
 # MAGIC - `wakecap_prod.gold.fact_workers_tasks` (dbo.FactWorkersTasks)
 # MAGIC - `wakecap_prod.silver.silver_task` (dbo.Task)
 # MAGIC - `wakecap_prod.silver.silver_location_group` (dbo.LocationGroup)
-# MAGIC - `wakecap_prod.raw.timescale_manual_location_assignment` (stg.wc2023_ManualLocationAssignment_full)
+# MAGIC - `wakecap_prod.silver.silver_manual_location_assignment` (TimescaleDB: ManualLocationAssignment)
 # MAGIC - `wakecap_prod.silver.silver_worker` (dbo.Worker)
 # MAGIC - `wakecap_prod.silver.silver_zone` (dbo.Zone)
 # MAGIC - `wakecap_prod.silver.silver_crew` (dbo.Crew)
@@ -46,16 +46,15 @@ from datetime import datetime, timedelta
 
 # Catalog and Schema Configuration
 TARGET_CATALOG = "wakecap_prod"
-RAW_SCHEMA = "raw"
 SILVER_SCHEMA = "silver"
 GOLD_SCHEMA = "gold"
 MIGRATION_SCHEMA = "migration"
 
-# Source tables
+# Source tables - Using Silver layer tables
 FACT_WORKERS_TASKS = f"{TARGET_CATALOG}.{GOLD_SCHEMA}.fact_workers_tasks"
 SILVER_TASK = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_task"
 SILVER_LOCATION_GROUP = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_location_group"
-MANUAL_LOCATION_ASSIGNMENT = f"{TARGET_CATALOG}.{RAW_SCHEMA}.timescale_manual_location_assignment"
+MANUAL_LOCATION_ASSIGNMENT = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_manual_location_assignment"
 
 # Dimension tables for manual assignments
 DIM_WORKER = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_worker"
@@ -702,7 +701,7 @@ if len(rules_list) > 0:
     else:
         rules_df = rules_list[0].unionByName(rules_list[1], allowMissingColumns=True)
 
-    rules_df = rules_df.cache()
+    # Note: cache() removed - not supported on serverless compute
     total_rules = rules_df.count()
     print(f"\nCombined rules (#rules temp table): {total_rules:,} rows")
 else:
@@ -792,7 +791,7 @@ consolidated_rules = rules_with_grp.groupBy(
 # Drop the Grp column
 consolidated_rules = consolidated_rules.drop("Grp")
 
-consolidated_rules = consolidated_rules.cache()
+# Note: cache() removed - not supported on serverless compute
 consolidated_count = consolidated_rules.count()
 print(f"Consolidated rules (merge source): {consolidated_count:,} rows")
 
@@ -1148,9 +1147,7 @@ display(spark.sql(f"SELECT * FROM {TARGET_TABLE} ORDER BY ProjectID, WorkerID, V
 
 # COMMAND ----------
 
-# Clean up cached DataFrames
-rules_df.unpersist()
-consolidated_rules.unpersist()
+# Clean up (unpersist removed - cache() not used on serverless compute)
 
 # Final summary
 print("=" * 60)

@@ -595,8 +595,8 @@ try:
         if recovered_count > 0:
             # Store recovered records for processing
             recovered_df = recoverable.select("ta.*")
-            recovered_df = recovered_df.cache()
-            print(f"  Cached {recovered_count} recovered records for processing")
+            # Note: cache() removed - not supported on serverless compute
+            print(f"  Stored {recovered_count} recovered records for processing")
     else:
         print("No stalled records to recover")
 
@@ -1018,8 +1018,7 @@ print("=" * 60)
 print("PHASE 8: Prepare Final Output")
 print("=" * 60)
 
-# Cache the batch for reuse
-batch_df = batch_df.cache()
+# Note: cache() removed - not supported on serverless compute
 batch_count = batch_df.count()
 print(f"Batch records ready: {batch_count:,}")
 
@@ -1173,7 +1172,7 @@ if recovered_count > 0 and recovered_df is not None:
         spark.catalog.dropTempView("recovered_ids_view")
         print(f"  Deleted {recovered_count} recovered records from stalled table")
 
-        recovered_df.unpersist()
+        # Note: unpersist() removed - cache() not used on serverless compute
     except Exception as e:
         print(f"  Warning: Could not delete recovered records: {str(e)[:100]}")
 
@@ -1282,8 +1281,7 @@ display(spark.table(TARGET_TABLE).filter(F.col("ExtSourceId") == EXT_SOURCE_ID).
 
 # COMMAND ----------
 
-# Clean up cached DataFrames
-batch_df.unpersist()
+# Clean up (unpersist removed - cache() not used on serverless compute)
 
 # Final summary
 print("=" * 60)

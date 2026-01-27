@@ -20,8 +20,8 @@
 # MAGIC - Watermark-based incremental processing
 # MAGIC
 # MAGIC **Source Tables:**
-# MAGIC - `wakecap_prod.bronze.wc2023_resourcehours_full` (stg.wc2023_ResourceHours_full)
-# MAGIC - `wakecap_prod.bronze.wc2023_resourcetimesheet_full` (stg.wc2023_ResourceTimesheet_full)
+# MAGIC - `wakecap_prod.silver.silver_fact_resource_hours` (TimescaleDB: ResourceHours)
+# MAGIC - `wakecap_prod.silver.silver_fact_resource_timesheet` (TimescaleDB: ResourceTimesheet)
 # MAGIC - `wakecap_prod.gold.gold_fact_workers_tasks` (dbo.FactWorkersTasks)
 # MAGIC - `wakecap_prod.silver.silver_task` (dbo.Task)
 # MAGIC - `wakecap_prod.silver.silver_worker` (dbo.Worker)
@@ -39,6 +39,8 @@ from pyspark.sql.types import *
 from delta.tables import DeltaTable
 from datetime import datetime, timedelta
 
+print("=== NOTEBOOK STARTED - Imports successful ===", flush=True)
+
 # COMMAND ----------
 
 # MAGIC %md
@@ -48,18 +50,18 @@ from datetime import datetime, timedelta
 
 # Catalog and Schema Configuration
 TARGET_CATALOG = "wakecap_prod"
-BRONZE_SCHEMA = "bronze"
 SILVER_SCHEMA = "silver"
 GOLD_SCHEMA = "gold"
 MIGRATION_SCHEMA = "migration"
 
-# Source tables
-SOURCE_RESOURCE_HOURS = f"{TARGET_CATALOG}.{BRONZE_SCHEMA}.wc2023_resourcehours_full"
-SOURCE_RESOURCE_TIMESHEET = f"{TARGET_CATALOG}.{BRONZE_SCHEMA}.wc2023_resourcetimesheet_full"
+# Source tables - Using Silver layer tables (updated with full column structure)
+SOURCE_RESOURCE_HOURS = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_fact_resource_hours"
+SOURCE_RESOURCE_TIMESHEET = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_fact_resource_timesheet"
 SOURCE_FACT_WORKERS_TASKS = f"{TARGET_CATALOG}.{GOLD_SCHEMA}.gold_fact_workers_tasks"
 SOURCE_TASK = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_task"
 SOURCE_WORKER = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_worker"
-SOURCE_PROJECT = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_project"
+# NOTE: Use silver_project_dw which has ExtProjectID (UUID) that matches fact tables' ProjectId
+SOURCE_PROJECT = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_project_dw"
 SOURCE_WORKER_STATUS = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_worker_status"
 
 # Target table
@@ -88,8 +90,9 @@ dbutils.widgets.text("project_id", "", "Project ID (optional filter)")
 load_mode = dbutils.widgets.get("load_mode")
 project_filter = dbutils.widgets.get("project_id")
 
-print(f"Load Mode: {load_mode}")
-print(f"Project Filter: {project_filter if project_filter else 'None'}")
+print(f"Load Mode: {load_mode}", flush=True)
+print(f"Project Filter: {project_filter if project_filter else 'None'}", flush=True)
+print("=== WIDGETS CONFIGURED ===", flush=True)
 
 # COMMAND ----------
 
@@ -240,16 +243,19 @@ resource_timesheet_df = spark.table(SOURCE_RESOURCE_TIMESHEET)
 
 # Calculate new attendance watermark from both tables
 # Original: MAX(CreatedAt, UpdatedAt, DeletedAt) across both tables
-hours_watermarks = resource_hours_df.select(
-    F.col("CreatedAt").alias("ts1"),
-    F.col("UpdatedAt").alias("ts2"),
-    F.col("DeletedAt").alias("ts3")
-)
-timesheet_watermarks = resource_timesheet_df.select(
-    F.col("CreatedAt").alias("ts1"),
-    F.col("UpdatedAt").alias("ts2"),
-    F.col("DeletedAt").alias("ts3")
-)
+# Note: Silver tables may not have DeletedAt column - use coalesce with null literal
+def get_watermark_cols(df):
+    """Get watermark columns, handling missing DeletedAt."""
+    cols = df.columns
+    has_deleted = "DeletedAt" in cols
+    return df.select(
+        F.col("CreatedAt").alias("ts1"),
+        F.col("UpdatedAt").alias("ts2"),
+        F.col("DeletedAt").alias("ts3") if has_deleted else F.lit(None).cast("timestamp").alias("ts3")
+    )
+
+hours_watermarks = get_watermark_cols(resource_hours_df)
+timesheet_watermarks = get_watermark_cols(resource_timesheet_df)
 
 combined_watermarks = hours_watermarks.union(timesheet_watermarks)
 max_ts = combined_watermarks.select(
@@ -306,60 +312,65 @@ print("STEP 3: Prepare Dimension Lookups")
 print("=" * 60)
 
 # Worker dimension lookup (for WorkerID and ApprovedByWorkerID)
-# Original: ROW_NUMBER() OVER (PARTITION BY ExtWorkerID, fnExtSourceIDAlias(ExtSourceID) ORDER BY (SELECT NULL)) rn = 1
-worker_df = spark.table(SOURCE_WORKER) \
-    .withColumn("_ext_source_alias", fn_ext_source_id_alias("ExtSourceID")) \
-    .withColumn("_rn", F.row_number().over(
-        Window.partitionBy("ExtWorkerID", "_ext_source_alias").orderBy(F.lit(1))
-    )) \
-    .filter(F.col("_rn") == 1) \
-    .filter(F.col("_ext_source_alias") == EXT_SOURCE_ID_ALIAS)
+# Note: Silver tables use direct IDs (WorkerId) not ExtWorkerID pattern
+worker_df = spark.table(SOURCE_WORKER)
+
+# Simple dedup by WorkerId
+worker_window = Window.partitionBy("WorkerId").orderBy(F.lit(1))
+worker_deduped = worker_df \
+    .withColumn("_rn", F.row_number().over(worker_window)) \
+    .filter(F.col("_rn") == 1)
 
 # Create two aliases for the two different worker lookups
-worker_lookup_df = worker_df.select(
-    F.col("WorkerID").alias("dim_WorkerID"),
-    F.col("ExtWorkerID").alias("dim_ExtWorkerID")
+worker_lookup_df = worker_deduped.select(
+    F.col("WorkerId").alias("dim_WorkerID"),
+    F.col("WorkerId").alias("dim_ExtWorkerID")  # Same as WorkerId for direct mapping
 )
 
-approved_by_lookup_df = worker_df.select(
-    F.col("WorkerID").alias("dim_ApprovedByWorkerID"),
-    F.col("ExtWorkerID").alias("dim_ApprovedByExtID")
+approved_by_lookup_df = worker_deduped.select(
+    F.col("WorkerId").alias("dim_ApprovedByWorkerID"),
+    F.col("WorkerId").cast("string").alias("dim_ApprovedByExtID")  # Cast to string to match UUID ApprovedById
 )
 
 print(f"Worker dimension records: {worker_lookup_df.count()}")
 
 # Project dimension lookup
-project_df = spark.table(SOURCE_PROJECT) \
-    .withColumn("_ext_source_alias", fn_ext_source_id_alias("ExtSourceID")) \
-    .withColumn("_rn", F.row_number().over(
-        Window.partitionBy("ExtProjectID", "_ext_source_alias").orderBy(F.lit(1))
-    )) \
-    .filter(F.col("_rn") == 1) \
-    .filter(F.col("_ext_source_alias") == EXT_SOURCE_ID_ALIAS)
+# NOTE: silver_project_dw has ExtProjectID (UUID) that matches fact tables' ProjectId
+# Columns: ProjectID (INT), ExtProjectID (UUID), ProjectName, ExtSourceID
+project_df = spark.table(SOURCE_PROJECT)
 
-project_lookup_df = project_df.select(
-    F.col("ProjectID").alias("dim_ProjectID"),
-    F.col("ExtProjectID").alias("dim_ExtProjectID")
-)
+# Deduplicate by ExtProjectID
+project_window = Window.partitionBy("ExtProjectID").orderBy(F.lit(1))
+project_lookup_df = project_df \
+    .withColumn("_rn", F.row_number().over(project_window)) \
+    .filter(F.col("_rn") == 1) \
+    .select(
+        F.col("ProjectID").alias("dim_ProjectID"),
+        F.col("ExtProjectID").alias("dim_ExtProjectID")  # UUID that matches fact.ProjectId
+    )
 
 print(f"Project dimension records: {project_lookup_df.count()}")
 
 # WorkerStatus dimension lookup (for DelayReasonID)
+# Note: May not be available in TimescaleDB-sourced Silver tables
 try:
-    worker_status_df = spark.table(SOURCE_WORKER_STATUS) \
-        .withColumn("_ext_source_alias", fn_ext_source_id_alias("ExtSourceID")) \
-        .withColumn("_rn", F.row_number().over(
-            Window.partitionBy("ExtDelayReasonID", "_ext_source_alias").orderBy(F.lit(1))
-        )) \
-        .filter(F.col("_rn") == 1) \
-        .filter(F.col("_ext_source_alias") == EXT_SOURCE_ID_ALIAS)
+    worker_status_df = spark.table(SOURCE_WORKER_STATUS)
 
-    worker_status_lookup_df = worker_status_df.select(
-        F.col("WorkerStatusID").alias("dim_WorkerStatusID"),
-        F.col("ExtDelayReasonID").alias("dim_ExtDelayReasonID")
-    )
-    print(f"WorkerStatus dimension records: {worker_status_lookup_df.count()}")
-    has_worker_status = True
+    # Check for required columns
+    if "WorkerStatusId" in worker_status_df.columns:
+        status_window = Window.partitionBy("WorkerStatusId").orderBy(F.lit(1))
+        worker_status_lookup_df = worker_status_df \
+            .withColumn("_rn", F.row_number().over(status_window)) \
+            .filter(F.col("_rn") == 1) \
+            .select(
+                F.col("WorkerStatusId").alias("dim_WorkerStatusID"),
+                F.col("WorkerStatusId").alias("dim_ExtDelayReasonID")  # Direct mapping
+            )
+        print(f"WorkerStatus dimension records: {worker_status_lookup_df.count()}")
+        has_worker_status = True
+    else:
+        print(f"[WARN] WorkerStatus table missing expected columns")
+        has_worker_status = False
 except Exception as e:
     print(f"[WARN] WorkerStatus not available: {str(e)[:50]}")
     has_worker_status = False
@@ -385,9 +396,9 @@ rh_df = resource_hours_df \
         F.col("TotalHours").alias("TotalHours")
     )
 
-# Load and filter ResourceTimesheet (not deleted)
+# Load ResourceTimesheet (DeletedAt column may not exist in Silver table)
+# Note: TimesheetRemarks column doesn't exist in Silver - using NULL instead
 rt_df = resource_timesheet_df \
-    .filter(F.col("DeletedAt").isNull()) \
     .select(
         F.col("ProjectId").alias("rt_ProjectId"),
         F.col("ResourceId").alias("rt_ResourceId"),
@@ -398,7 +409,7 @@ rt_df = resource_timesheet_df \
         F.col("ApprovedAttendanceStatus"),
         F.col("ApprovedById"),
         F.col("TimesheetRemarksId").alias("DelayReasonId"),
-        F.col("TimesheetRemarks").alias("DelayRemarks")
+        F.lit(None).cast("string").alias("DelayRemarks")  # TimesheetRemarks not in Silver
     )
 
 # FULL OUTER JOIN on ProjectId, PeopleId/ResourceId, Date/Day
@@ -459,9 +470,10 @@ att_with_approved = att_with_worker.alias("att").join(
 )
 
 # Project lookup (INNER JOIN - required)
+# Note: UUIDs are case-sensitive in string comparison, normalize to uppercase
 att_with_project = att_with_approved.alias("att").join(
     project_lookup_df.alias("p"),
-    F.col("att.ProjectId") == F.col("p.dim_ExtProjectID"),
+    F.upper(F.col("att.ProjectId")) == F.upper(F.col("p.dim_ExtProjectID")),
     "inner"
 ).select(
     "att.*",
@@ -642,7 +654,7 @@ final_df = combined_df \
         F.col("DelayRemarks")
     )
 
-final_df.cache()
+# Note: cache() removed - not supported on serverless compute
 final_count = final_df.count()
 print(f"Final source records: {final_count}")
 
@@ -671,9 +683,9 @@ target_schema = """
     ApprovedByWorkerID INT,
     WorkerStatusID INT,
     DelayReasonRemarks STRING,
-    WatermarkUTC TIMESTAMP DEFAULT current_timestamp(),
-    CreatedAt TIMESTAMP DEFAULT current_timestamp(),
-    UpdatedAt TIMESTAMP DEFAULT current_timestamp()
+    WatermarkUTC TIMESTAMP,
+    CreatedAt TIMESTAMP,
+    UpdatedAt TIMESTAMP
 """
 
 try:
@@ -858,8 +870,7 @@ print(f"Tasks Watermark updated to: {new_tasks_watermark}")
 
 # COMMAND ----------
 
-# Cleanup
-final_df.unpersist()
+# Cleanup (unpersist removed - cache() not used on serverless compute)
 
 # Print summary
 print("=" * 60)

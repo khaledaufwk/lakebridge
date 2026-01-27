@@ -882,8 +882,7 @@ batch_df = batch_df.withColumn("RN", F.row_number().over(window))
 
 # COMMAND ----------
 
-# Cache the batch DataFrame for reuse
-batch_df = batch_df.cache()
+# Note: cache() removed - not supported on serverless compute
 batch_count = batch_df.count()
 print(f"Batch DataFrame ready: {batch_count:,} records (before dedup)")
 
@@ -1309,8 +1308,7 @@ else:
 
 # COMMAND ----------
 
-# Clean up cached DataFrame
-batch_df.unpersist()
+# Clean up (unpersist removed - cache() not used on serverless compute)
 
 # Final summary
 print("=" * 60)

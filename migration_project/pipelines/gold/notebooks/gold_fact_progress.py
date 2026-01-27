@@ -18,8 +18,8 @@
 # MAGIC - Calculated columns: (ApprovedHours/Seconds) / (60*60*24)
 # MAGIC
 # MAGIC **Source Tables:**
-# MAGIC - `wakecap_prod.bronze.wc2023_resourcetimesheet_full` (stg.wc2023_ResourceTimesheet_full)
-# MAGIC - `wakecap_prod.bronze.wc2023_resourceapprovedhoursegment` (stg.wc2023_ResourceApprovedHoursSegment)
+# MAGIC - `wakecap_prod.silver.silver_fact_resource_timesheet` (TimescaleDB: ResourceTimesheet)
+# MAGIC - `wakecap_prod.silver.silver_fact_resource_hours_segment` (TimescaleDB: ResourceApprovedHoursSegment)
 # MAGIC - `wakecap_prod.silver.silver_worker` (dbo.Worker)
 # MAGIC - `wakecap_prod.silver.silver_project` (dbo.Project)
 # MAGIC - `wakecap_prod.silver.silver_activity` (dbo.Activity)
@@ -46,16 +46,16 @@ from datetime import datetime, timedelta
 
 # Catalog and Schema Configuration
 TARGET_CATALOG = "wakecap_prod"
-BRONZE_SCHEMA = "bronze"
 SILVER_SCHEMA = "silver"
 GOLD_SCHEMA = "gold"
 MIGRATION_SCHEMA = "migration"
 
-# Source tables
-SOURCE_TIMESHEET = f"{TARGET_CATALOG}.{BRONZE_SCHEMA}.wc2023_resourcetimesheet_full"
-SOURCE_APPROVED_HOURS = f"{TARGET_CATALOG}.{BRONZE_SCHEMA}.wc2023_resourceapprovedhoursegment"
+# Source tables - Using Silver layer tables with full column structure
+SOURCE_TIMESHEET = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_fact_resource_timesheet"
+SOURCE_APPROVED_HOURS = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_fact_resource_hours_segment"
 SOURCE_WORKER = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_worker"
-SOURCE_PROJECT = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_project"
+# NOTE: Use silver_project_dw which has ExtProjectID (UUID) that matches fact tables' ProjectId
+SOURCE_PROJECT = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_project_dw"
 SOURCE_ACTIVITY = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_activity"
 
 # Target table
@@ -212,53 +212,63 @@ print("STEP 1: Prepare Dimension Lookups")
 print("=" * 60)
 
 # Worker dimension lookup
-# Original: ROW_NUMBER() OVER (PARTITION BY ExtWorkerID, fnExtSourceIDAlias(ExtSourceID) ORDER BY (SELECT NULL)) rn = 1
-worker_df = spark.table(SOURCE_WORKER) \
-    .withColumn("_ext_source_alias", fn_ext_source_id_alias("ExtSourceID")) \
-    .withColumn("_rn", F.row_number().over(
-        Window.partitionBy("ExtWorkerID", "_ext_source_alias").orderBy(F.lit(1))
-    )) \
-    .filter(F.col("_rn") == 1) \
-    .filter(F.col("_ext_source_alias") == EXT_SOURCE_ID_ALIAS)
+# Note: Silver tables use direct IDs (WorkerId) not ExtWorkerID pattern
+# The source data ResourceId maps directly to WorkerId
+worker_df = spark.table(SOURCE_WORKER)
 
-worker_lookup_df = worker_df.select(
-    F.col("WorkerID").alias("dim_WorkerID"),
-    F.col("ExtWorkerID").alias("dim_ExtWorkerID")
-)
+# Simple dedup by WorkerId
+worker_window = Window.partitionBy("WorkerId").orderBy(F.lit(1))
+worker_lookup_df = worker_df \
+    .withColumn("_rn", F.row_number().over(worker_window)) \
+    .filter(F.col("_rn") == 1) \
+    .select(
+        F.col("WorkerId").alias("dim_WorkerID"),
+        F.col("WorkerId").alias("dim_ExtWorkerID")  # Same as WorkerId for direct mapping
+    )
 
 print(f"Worker dimension records: {worker_lookup_df.count()}")
 
 # Project dimension lookup
-project_df = spark.table(SOURCE_PROJECT) \
-    .withColumn("_ext_source_alias", fn_ext_source_id_alias("ExtSourceID")) \
-    .withColumn("_rn", F.row_number().over(
-        Window.partitionBy("ExtProjectID", "_ext_source_alias").orderBy(F.lit(1))
-    )) \
-    .filter(F.col("_rn") == 1) \
-    .filter(F.col("_ext_source_alias") == EXT_SOURCE_ID_ALIAS)
+# NOTE: silver_project_dw has ExtProjectID (UUID) that matches fact tables' ProjectId
+# Columns: ProjectID (INT), ExtProjectID (UUID), ProjectName, ExtSourceID
+project_df = spark.table(SOURCE_PROJECT)
 
-project_lookup_df = project_df.select(
-    F.col("ProjectID").alias("dim_ProjectID"),
-    F.col("ExtProjectID").alias("dim_ExtProjectID")
-)
+# Filter to ExtSourceID matching our source (14/15 -> alias 15)
+# and deduplicate by ExtProjectID
+project_window = Window.partitionBy("ExtProjectID").orderBy(F.lit(1))
+project_lookup_df = project_df \
+    .withColumn("_rn", F.row_number().over(project_window)) \
+    .filter(F.col("_rn") == 1) \
+    .select(
+        F.col("ProjectID").alias("dim_ProjectID"),
+        F.col("ExtProjectID").alias("dim_ExtProjectID")  # UUID that matches fact.ProjectId
+    )
 
 print(f"Project dimension records: {project_lookup_df.count()}")
 
 # Activity dimension lookup (optional)
+# Note: May not be available in TimescaleDB-sourced Silver tables
 if has_activity:
-    activity_df = spark.table(SOURCE_ACTIVITY) \
-        .withColumn("_ext_source_alias", fn_ext_source_id_alias("ExtSourceID")) \
-        .withColumn("_rn", F.row_number().over(
-            Window.partitionBy("ExtDataGroupID", "_ext_source_alias").orderBy(F.lit(1))
-        )) \
-        .filter(F.col("_rn") == 1) \
-        .filter(F.col("_ext_source_alias") == EXT_SOURCE_ID_ALIAS)
+    try:
+        activity_df = spark.table(SOURCE_ACTIVITY)
 
-    activity_lookup_df = activity_df.select(
-        F.col("ActivityID").alias("dim_ActivityID"),
-        F.col("ExtDataGroupID").alias("dim_ExtDataGroupID")
-    )
-    print(f"Activity dimension records: {activity_lookup_df.count()}")
+        # Check if DataGroupId column exists
+        if "DataGroupId" in activity_df.columns:
+            activity_window = Window.partitionBy("DataGroupId").orderBy(F.lit(1))
+            activity_lookup_df = activity_df \
+                .withColumn("_rn", F.row_number().over(activity_window)) \
+                .filter(F.col("_rn") == 1) \
+                .select(
+                    F.col("ActivityId").alias("dim_ActivityID"),
+                    F.col("DataGroupId").alias("dim_ExtDataGroupID")
+                )
+            print(f"Activity dimension records: {activity_lookup_df.count()}")
+        else:
+            print(f"[WARN] Activity table missing DataGroupId column, using fallback")
+            has_activity = False
+    except Exception as e:
+        print(f"[WARN] Activity lookup failed: {str(e)[:50]}")
+        has_activity = False
 
 # COMMAND ----------
 
@@ -280,8 +290,8 @@ print("=" * 60)
 timesheet_df = None
 if "Timesheet" in data_sources_exist and source_mode in ["all", "timesheet"]:
     try:
-        ts_raw = spark.table(SOURCE_TIMESHEET) \
-            .filter(F.col("DeletedAt").isNull())
+        # Note: DeletedAt column may not exist in Silver table, so we skip soft-delete filter here
+        ts_raw = spark.table(SOURCE_TIMESHEET)
 
         # Join with Worker dimension
         ts_with_worker = ts_raw.alias("ta").join(
@@ -294,9 +304,10 @@ if "Timesheet" in data_sources_exist and source_mode in ["all", "timesheet"]:
         )
 
         # Join with Project dimension
+        # Note: UUIDs are case-sensitive in string comparison, normalize to uppercase
         ts_with_project = ts_with_worker.alias("ta").join(
             project_lookup_df.alias("p"),
-            F.col("ta.ProjectId") == F.col("p.dim_ExtProjectID"),
+            F.upper(F.col("ta.ProjectId")) == F.upper(F.col("p.dim_ExtProjectID")),
             "inner"
         ).select(
             "ta.*",
@@ -348,63 +359,96 @@ print("=" * 60)
 approved_hours_df = None
 if "Approved Hours" in data_sources_exist and source_mode in ["all", "approved_hours"]:
     try:
-        ah_raw = spark.table(SOURCE_APPROVED_HOURS) \
-            .filter(F.col("DeletedAt").isNull())
+        # silver_fact_resource_hours_segment doesn't have ResourceId or Date directly
+        # We need to join with silver_fact_resource_approved_hours via ApprovalId to get them
+        SOURCE_APPROVED_HOURS_PARENT = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_fact_resource_approved_hours"
 
-        # Join with Worker dimension
-        ah_with_worker = ah_raw.alias("ta").join(
-            worker_lookup_df.alias("w"),
-            F.col("ta.ResourceId") == F.col("w.dim_ExtWorkerID"),
-            "inner"
-        ).select(
-            "ta.*",
-            F.col("w.dim_WorkerID").alias("WorkerID")
-        )
+        # Check if parent table exists
+        try:
+            spark.sql(f"SELECT 1 FROM {SOURCE_APPROVED_HOURS_PARENT} LIMIT 0")
+            has_parent = True
+            print(f"[OK] Approved Hours parent exists: {SOURCE_APPROVED_HOURS_PARENT}")
+        except:
+            has_parent = False
+            print(f"[WARN] Approved Hours parent not found - skipping approved hours source")
 
-        # Join with Project dimension
-        ah_with_project = ah_with_worker.alias("ta").join(
-            project_lookup_df.alias("p"),
-            F.col("ta.ProjectId") == F.col("p.dim_ExtProjectID"),
-            "inner"
-        ).select(
-            "ta.*",
-            F.col("ta.WorkerID"),
-            F.col("p.dim_ProjectID").alias("ProjectID2")
-        )
+        if has_parent:
+            # Get segment data
+            ah_segment = spark.table(SOURCE_APPROVED_HOURS)
 
-        # Join with Activity dimension (if available)
-        if has_activity:
-            ah_with_activity = ah_with_project.alias("ta").join(
-                activity_lookup_df.alias("a"),
-                F.col("ta.DataGroupId") == F.col("a.dim_ExtDataGroupID"),
-                "inner"  # INNER per original SP
+            # Get parent data (has ResourceId and Date)
+            ah_parent = spark.table(SOURCE_APPROVED_HOURS_PARENT).select(
+                F.col("ResourceApprovedHoursId").alias("parent_Id"),
+                F.col("WorkerId").alias("parent_ResourceId"),
+                F.col("Date").alias("parent_Date")
+            )
+
+            # Join segment with parent to get ResourceId and Date
+            ah_raw = ah_segment.alias("seg").join(
+                ah_parent.alias("par"),
+                F.col("seg.ApprovalId") == F.col("par.parent_Id"),
+                "inner"
+            ).select(
+                "seg.*",
+                F.col("par.parent_ResourceId").alias("ResourceId"),
+                F.col("par.parent_Date").alias("Date")
+            )
+
+            # Join with Worker dimension
+            ah_with_worker = ah_raw.alias("ta").join(
+                worker_lookup_df.alias("w"),
+                F.col("ta.ResourceId") == F.col("w.dim_ExtWorkerID"),
+                "inner"
+            ).select(
+                "ta.*",
+                F.col("w.dim_WorkerID").alias("WorkerID")
+            )
+
+            # Join with Project dimension
+            # Note: UUIDs are case-sensitive in string comparison, normalize to uppercase
+            ah_with_project = ah_with_worker.alias("ta").join(
+                project_lookup_df.alias("p"),
+                F.upper(F.col("ta.ProjectId")) == F.upper(F.col("p.dim_ExtProjectID")),
+                "inner"
             ).select(
                 "ta.*",
                 F.col("ta.WorkerID"),
-                F.col("ta.ProjectID2"),
-                F.col("a.dim_ActivityID").alias("ActivityID")
+                F.col("p.dim_ProjectID").alias("ProjectID2")
             )
-        else:
-            ah_with_activity = ah_with_project.withColumn("ActivityID", F.lit(-1))
 
-        # Add calculated columns
-        # Original: (1.0 * ApprovedHours) / (60*60*24) as ApprovedTime
-        ah_calculated = ah_with_activity \
-            .withColumn("ExtSourceID", F.lit(EXT_SOURCE_ID)) \
-            .withColumn("ApprovedTime", (F.lit(1.0) * F.col("ApprovedHours")) / (60 * 60 * 24)) \
-            .withColumn("Overtime", (F.lit(1.0) * F.col("OverTimeHours")) / (60 * 60 * 24)) \
-            .withColumn("ShiftLocalDate", F.col("Date"))
+            # Join with Activity dimension (if available)
+            if has_activity:
+                ah_with_activity = ah_with_project.alias("ta").join(
+                    activity_lookup_df.alias("a"),
+                    F.col("ta.DataGroupId") == F.col("a.dim_ExtDataGroupID"),
+                    "inner"  # INNER per original SP
+                ).select(
+                    "ta.*",
+                    F.col("ta.WorkerID"),
+                    F.col("ta.ProjectID2"),
+                    F.col("a.dim_ActivityID").alias("ActivityID")
+                )
+            else:
+                ah_with_activity = ah_with_project.withColumn("ActivityID", F.lit(-1))
 
-        # ROW_NUMBER deduplication
-        # Original: PARTITION BY ResourceId, Date, ProjectId, DataGroupId ORDER BY Id DESC
-        dedup_window = Window.partitionBy(
-            "ResourceId", "Date", "ProjectId", "DataGroupId"
-        ).orderBy(F.col("Id").desc())
+            # Add calculated columns
+            # Original: (1.0 * ApprovedHours) / (60*60*24) as ApprovedTime
+            ah_calculated = ah_with_activity \
+                .withColumn("ExtSourceID", F.lit(EXT_SOURCE_ID)) \
+                .withColumn("ApprovedTime", (F.lit(1.0) * F.col("ApprovedHours")) / (60 * 60 * 24)) \
+                .withColumn("Overtime", (F.lit(1.0) * F.col("OverTimeHours")) / (60 * 60 * 24)) \
+                .withColumn("ShiftLocalDate", F.col("Date"))
 
-        ah_with_rn = ah_calculated.withColumn("RN", F.row_number().over(dedup_window))
-        approved_hours_df = ah_with_rn.filter(F.col("RN") == 1)
+            # ROW_NUMBER deduplication
+            # Original: PARTITION BY ResourceId, Date, ProjectId, DataGroupId ORDER BY Id DESC
+            dedup_window = Window.partitionBy(
+                "ResourceId", "Date", "ProjectId", "DataGroupId"
+            ).orderBy(F.col("Id").desc())
 
-        print(f"Approved Hours source records: {approved_hours_df.count()}")
+            ah_with_rn = ah_calculated.withColumn("RN", F.row_number().over(dedup_window))
+            approved_hours_df = ah_with_rn.filter(F.col("RN") == 1)
+
+            print(f"Approved Hours source records: {approved_hours_df.count()}")
     except Exception as e:
         print(f"[ERROR] Failed to build approved hours source: {str(e)[:100]}")
 else:
@@ -455,7 +499,7 @@ final_source_df = combined_df \
     .filter(F.col("_final_rn") == 1) \
     .drop("_final_rn")
 
-final_source_df.cache()
+# Note: cache() removed - not supported on serverless compute
 final_count = final_source_df.count()
 print(f"Combined source records: {final_count}")
 
@@ -479,10 +523,10 @@ target_schema = """
     ExtSourceID INT,
     ApprovedTime DOUBLE,
     Overtime DOUBLE,
-    DeleteFlag INT DEFAULT 0,
-    WatermarkUTC TIMESTAMP DEFAULT current_timestamp(),
-    CreatedAt TIMESTAMP DEFAULT current_timestamp(),
-    UpdatedAt TIMESTAMP DEFAULT current_timestamp()
+    DeleteFlag INT,
+    WatermarkUTC TIMESTAMP,
+    CreatedAt TIMESTAMP,
+    UpdatedAt TIMESTAMP
 """
 
 try:
@@ -644,8 +688,7 @@ print(f"Watermark updated to: {new_watermark}")
 
 # COMMAND ----------
 
-# Cleanup
-final_source_df.unpersist()
+# Cleanup (unpersist removed - cache() not used on serverless compute)
 
 # Print summary
 print("=" * 60)

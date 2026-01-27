@@ -301,10 +301,11 @@ else:
 # FROM source ta INNER JOIN project t1 ON t1.ExtProjectID = ta.project_id
 
 # Join with project dimension (INNER JOIN - drops records without matching project)
+# Note: UUIDs are case-sensitive in string comparison, normalize to uppercase
 batch_with_project = combined_source_df.alias("src") \
     .join(
         project_lookup_df.alias("proj"),
-        F.col("src.project_id") == F.col("proj.dim_ExtProjectID"),
+        F.upper(F.col("src.project_id")) == F.upper(F.col("proj.dim_ExtProjectID")),
         "inner"
     ) \
     .select(
@@ -323,8 +324,7 @@ dedup_window = Window.partitionBy(
 batch_df = batch_with_project \
     .withColumn("RN", F.row_number().over(dedup_window))
 
-# Cache for multiple uses
-batch_df.cache()
+# Note: cache() removed - not supported on serverless compute
 batch_count = batch_df.count()
 dedup_count = batch_df.filter(F.col("RN") == 1).count()
 
@@ -366,9 +366,9 @@ target_schema = """
     CO2 DOUBLE,
     SO2 DOUBLE,
     CO DOUBLE,
-    WatermarkUTC TIMESTAMP DEFAULT current_timestamp(),
-    CreatedAt TIMESTAMP DEFAULT current_timestamp(),
-    UpdatedAt TIMESTAMP DEFAULT current_timestamp()
+    WatermarkUTC TIMESTAMP,
+    CreatedAt TIMESTAMP,
+    UpdatedAt TIMESTAMP
 """
 
 # Check if target table exists
@@ -717,8 +717,7 @@ print(f"Watermark updated to: {new_watermark}")
 
 # COMMAND ----------
 
-# Cleanup cached DataFrames
-batch_df.unpersist()
+# Cleanup (unpersist removed - cache() not used on serverless compute)
 
 # Print summary
 print("=" * 60)

@@ -2,6 +2,161 @@
 
 Reference this expert when writing Databricks notebooks or scripts that interact with Databricks APIs.
 
+## Critical: PERSIST/CACHE Not Supported on Serverless Compute
+
+**Problem:** Serverless compute in Databricks does not support `PERSIST TABLE`, `CACHE TABLE`, or DataFrame `cache()` / `persist()` operations. Using these results in the error:
+
+```
+[NOT_SUPPORTED_WITH_SERVERLESS] PERSIST TABLE is not supported on serverless compute. SQLSTATE: 0A000
+```
+
+This affects both SQL commands and PySpark DataFrame operations:
+
+```python
+# DON'T DO THIS on serverless compute - All of these fail:
+df.cache()
+df.persist()
+df.persist(StorageLevel.MEMORY_AND_DISK)
+spark.sql("CACHE TABLE my_table")
+spark.sql("PERSIST TABLE my_table")
+```
+
+**Solution:** Remove all cache/persist operations when running on serverless compute. The serverless infrastructure manages memory automatically:
+
+```python
+# DO THIS - Remove cache() calls entirely
+# df.cache()  # Removed - not supported on serverless
+df_count = df.count()
+
+# If you need to reuse a DataFrame multiple times, just reference it directly
+# Spark will optimize the execution plan automatically
+
+# At the end, remove unpersist() calls too
+# df.unpersist()  # Removed - no longer needed
+```
+
+**Alternative for classic compute:** If you must use caching and can switch to classic job clusters or all-purpose clusters, caching works as expected:
+
+```python
+# Only on classic compute (not serverless):
+df.cache()
+# ... multiple operations on df ...
+df.unpersist()
+```
+
+**Best Practice:** Design notebooks to work without caching by default. Serverless compute provides auto-scaling and optimized query execution that often performs better than manual caching anyway.
+
+---
+
+## Critical: Target Table Schema Mismatch (INT vs STRING for UUIDs)
+
+**Problem:** When migrating from TimescaleDB (which uses UUID strings) to Gold layer tables that were originally designed with INT columns for IDs, the MERGE fails:
+
+```
+[CAST_INVALID_INPUT] The value '0f52747e-9de9-421d-8aa8-fa9d01d66196' of the type "STRING" cannot be cast to "INT" because it is malformed.
+```
+
+**Solution:** Use STRING type for all ID columns that may contain UUIDs, and add logic to detect and recreate tables with wrong schema:
+
+```python
+# Target table schema - use STRING for ID columns
+target_schema = """
+    FactShiftCombinedID BIGINT GENERATED ALWAYS AS IDENTITY,
+    ProjectID STRING NOT NULL,
+    WorkerID STRING NOT NULL,
+    CrewID STRING,
+    ...
+"""
+
+# Check if table exists with wrong schema and recreate if needed
+table_needs_recreate = False
+try:
+    schema_df = spark.sql(f"DESCRIBE TABLE {TARGET_TABLE}")
+    project_id_type = schema_df.filter("col_name = 'ProjectID'").select("data_type").collect()
+    if project_id_type and project_id_type[0][0].upper() == "INT":
+        print(f"[WARN] Table exists with INT schema, need to recreate with STRING")
+        table_needs_recreate = True
+except:
+    table_needs_recreate = True
+
+if table_needs_recreate:
+    spark.sql(f"DROP TABLE IF EXISTS {TARGET_TABLE}")
+    spark.sql(f"CREATE TABLE {TARGET_TABLE} ({target_schema}) USING DELTA")
+```
+
+---
+
+## Critical: Gold Layer Column Name Differences (WakeCap)
+
+**Problem:** The `gold_fact_workers_history` table uses geographic column names (`Latitude`, `Longitude`) instead of generic coordinate names (`X`, `Y`). Using the wrong column names results in:
+
+```
+[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or function parameter with name `X` cannot be resolved. Did you mean one of the following? [`Latitude`, `Longitude`, ...]
+```
+
+**Solution:** Use the correct column names from the gold layer schema:
+
+```python
+# DON'T DO THIS - X/Y don't exist in gold_fact_workers_history
+history_df = spark.table(SOURCE_WORKERS_HISTORY).select(
+    F.col("X").alias("LocationX"),
+    F.col("Y").alias("LocationY")
+)
+
+# DO THIS - Use Latitude/Longitude
+history_df = spark.table(SOURCE_WORKERS_HISTORY).select(
+    F.col("Latitude").alias("LocationX"),
+    F.col("Longitude").alias("LocationY")
+)
+```
+
+**Best Practice:** Always check the actual schema before selecting columns:
+```python
+# Check available columns
+print(spark.table("wakecap_prod.gold.gold_fact_workers_history").columns)
+```
+
+---
+
+## Critical: Column DEFAULT Values Not Supported Without Feature Flag
+
+**Problem:** Delta Lake requires the `allowColumnDefaults` feature to be explicitly enabled before using `DEFAULT` values in CREATE TABLE statements. Without it, you'll get:
+
+```
+[WRONG_COLUMN_DEFAULTS_FOR_DELTA_FEATURE_NOT_ENABLED] Failed to execute CREATE TABLE command because it assigned a column DEFAULT value, but the corresponding table feature was not enabled.
+```
+
+**Solution:** Remove DEFAULT values from CREATE TABLE statements:
+
+```python
+# DON'T DO THIS - DEFAULT values require feature flag
+target_schema = """
+    WatermarkUTC TIMESTAMP DEFAULT current_timestamp(),
+    CreatedAt TIMESTAMP DEFAULT current_timestamp(),
+    UpdatedAt TIMESTAMP DEFAULT current_timestamp()
+"""
+
+# DO THIS - Remove DEFAULT values, set them in the INSERT/MERGE statement instead
+target_schema = """
+    WatermarkUTC TIMESTAMP,
+    CreatedAt TIMESTAMP,
+    UpdatedAt TIMESTAMP
+"""
+
+# Then in your MERGE statement, use current_timestamp() directly:
+"""
+WHEN NOT MATCHED THEN INSERT (..., WatermarkUTC, CreatedAt, UpdatedAt)
+VALUES (..., current_timestamp(), current_timestamp(), current_timestamp())
+"""
+```
+
+**Alternative:** Enable the feature on the table first (not recommended for new tables):
+```sql
+ALTER TABLE tableName SET TBLPROPERTIES('delta.feature.allowColumnDefaults' = 'supported')
+```
+
+---
+
 ## Critical: DBUtils in USER_ISOLATION Mode
 
 **Problem:** `DBUtils(spark)` does not work properly in USER_ISOLATION (Shared) cluster mode. The following pattern will fail:
@@ -456,3 +611,376 @@ dbutils.notebook.run("/path/to/notebook", timeout_seconds=3600, arguments={"para
 # Exit notebook with value
 dbutils.notebook.exit("Success")
 ```
+
+---
+
+## Critical: Type Mismatch When Joining UUID Strings with INT Columns
+
+**Problem:** When joining columns where one side contains UUID strings (from TimescaleDB or other sources) and the other side is an INT (from SQL Server or dimension tables), Spark attempts to cast the UUID string to BIGINT, which fails with:
+
+```
+[CAST_INVALID_INPUT] The value '26bbd5af-45a6-429b-8604-c6e54e24a80c' of the type "STRING"
+cannot be cast to "BIGINT" because it is malformed. Correct the value as per the syntax,
+or change its target type. Use `try_cast` to tolerate malformed input and return NULL instead.
+SQLSTATE: 22018
+```
+
+This commonly occurs in dimension lookups where:
+- The fact table has UUID-based foreign keys (e.g., `ApprovedById` as UUID string)
+- The dimension table has INT-based primary keys (e.g., `WorkerId` as INT)
+
+```python
+# DON'T DO THIS - UUID string cannot be cast to INT
+approved_by_lookup_df = worker_df.select(
+    F.col("WorkerId").alias("dim_ApprovedByWorkerID"),
+    F.col("WorkerId").alias("dim_ApprovedByExtID")  # INT column
+)
+
+# Join fails when ApprovedById is a UUID string
+att_df.join(approved_by_lookup_df,
+    F.col("ApprovedById") == F.col("dim_ApprovedByExtID"),  # UUID vs INT = error!
+    "left"
+)
+```
+
+**Solution:** Cast the INT column to STRING before the join:
+
+```python
+# Cast INT to STRING to match UUID format
+approved_by_lookup_df = worker_df.select(
+    F.col("WorkerId").alias("dim_ApprovedByWorkerID"),
+    F.col("WorkerId").cast("string").alias("dim_ApprovedByExtID")  # Cast to STRING
+)
+
+# Now the join works correctly
+att_df.join(approved_by_lookup_df,
+    F.col("ApprovedById") == F.col("dim_ApprovedByExtID"),  # STRING vs STRING = OK
+    "left"
+)
+```
+
+**Alternative - Use try_cast for fault tolerance:**
+
+```python
+# If you want to handle malformed UUIDs gracefully
+att_df.withColumn("ApprovedById_int", F.expr("try_cast(ApprovedById as BIGINT)"))
+```
+
+---
+
+## Critical: Silver-to-Gold Column Naming Mismatches (WakeCap Migration)
+
+**Problem:** When migrating from SQL Server (WakeCapDW) to Databricks using a medallion architecture, the Silver layer column names differ from the original SQL Server column names. Gold layer notebooks that assume SQL Server column names will fail with:
+
+```
+[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or function parameter
+with name `Worker` cannot be resolved. Did you mean one of the following?
+[`WorkerName`, `WorkerId`, `WorkerCode`, ...]
+```
+
+**Root Cause:** The TimescaleDB bronze layer → silver layer transformation renames columns to follow a consistent naming convention. Gold layer notebooks must reference the *silver* column names, not the original SQL Server names.
+
+### Silver Layer Column Name Reference (WakeCap)
+
+| Table | Original SQL Server | Silver Layer Name |
+|-------|--------------------|--------------------|
+| **silver_worker** | Worker | WorkerName |
+| | ExtWorkerId | *(not available)* |
+| | ValidFrom/ValidTo | *(use CreatedAt/UpdatedAt)* |
+| **silver_floor** | Floor | FloorName |
+| | FloorNumber | *(not available - derive from FloorName)* |
+| **silver_zone** | Zone | ZoneName |
+| **silver_crew** | Crew | CrewName |
+| **silver_device** | Device | DeviceName |
+| **silver_crew_type** | CrewType | CrewTypeName |
+| **silver_workshift** | Workshift | WorkshiftName |
+| **silver_workshift_schedule** | StartTime | StartHour *(decimal hours)* |
+| | EndTime | EndHour *(decimal hours)* |
+| | DayOfWeek | WorkshiftDayId |
+| **silver_crew_composition** | ValidFrom | CreatedAt |
+| | ValidTo | DeletedAt |
+| **silver_resource_device** | ValidFrom | AssignedAt |
+| | ValidTo | UnassignedAt |
+| | ProjectId | *(not available)* |
+| **silver_workshift_resource_assignment** | ValidFrom | EffectiveDate |
+| | ValidTo | *(not available - use latest EffectiveDate)* |
+| **silver_zone_category** | ZoneCategoryId | Id |
+| | ZoneCategoryName | ZoneCategoryName |
+
+### Common Fix Patterns
+
+**1. Name Columns (Worker, Floor, Zone, Crew, Device):**
+```python
+# DON'T DO THIS - SQL Server column names
+F.col("Worker").alias("WorkerName")
+F.col("Floor").alias("FloorName")
+
+# DO THIS - Silver layer already has these names
+F.col("WorkerName")
+F.col("FloorName")
+```
+
+**2. Validity Date Columns (ValidFrom/ValidTo):**
+```python
+# DON'T DO THIS - SQL Server pattern
+.filter(F.col("ValidTo").isNull())
+.orderBy(F.col("ValidFrom").desc())
+
+# DO THIS - Check the specific silver table
+# For crew_composition: CreatedAt/DeletedAt
+.filter(F.col("DeletedAt").isNull())
+.orderBy(F.col("CreatedAt").desc())
+
+# For resource_device: AssignedAt/UnassignedAt
+.filter(F.col("UnassignedAt").isNull())
+.orderBy(F.col("AssignedAt").desc())
+
+# For workshift_resource_assignment: EffectiveDate only
+.orderBy(F.col("EffectiveDate").desc())
+```
+
+**3. Time Columns (workshift_schedule):**
+
+**IMPORTANT:** In the Silver layer, `StartHour` and `EndHour` are stored as **TIMESTAMP** (not decimal hours). This causes `DATATYPE_MISMATCH` errors if you try to use arithmetic operations:
+
+```
+[DATATYPE_MISMATCH.UNEXPECTED_INPUT_TYPE] Cannot resolve "FLOOR(StartHour)" due to data type mismatch: The first parameter requires the ("DOUBLE" or "DECIMAL" or "BIGINT") type, however "StartHour" has the type "TIMESTAMP"
+```
+
+```python
+# DON'T DO THIS - Assumes StartHour is DOUBLE
+F.floor(F.col("StartHour"))
+F.col("StartHour") % 1 * 60  # Arithmetic on TIMESTAMP fails
+
+# DO THIS - Use date_format for display
+F.date_format(F.col("StartHour"), "HH:mm")  # Outputs "08:30"
+
+# DO THIS - Convert TIMESTAMP to decimal hours for calculations
+F.hour(F.col("StartHour")) + F.minute(F.col("StartHour")) / 60.0  # e.g., 8.5
+
+# Full pattern for display and calculations:
+ws_df = ws_df.withColumn(
+    "StartTimeDisplay",
+    F.when(
+        F.col("StartHour").isNotNull(),
+        F.date_format(F.col("StartHour"), "HH:mm")
+    ).otherwise(F.lit(None))
+).withColumn(
+    "StartHourDecimal",
+    F.hour(F.col("StartHour")) + F.minute(F.col("StartHour")) / 60.0
+)
+```
+
+**4. Missing Columns - Compute or Skip:**
+
+**IMPORTANT:** When extracting numeric parts from strings, handle empty results. `regexp_replace` returns empty string `''` when no matches, which cannot be cast to INT.
+
+```python
+# DON'T DO THIS - Empty string cast to INT fails
+floor_df = floor_df.withColumn(
+    "FloorNumericPart",
+    F.regexp_replace(F.col("FloorName"), "[^0-9]", "").cast("int")  # FAILS for "Ground"
+)
+
+# Error: [CAST_INVALID_INPUT] The value '' of the type "STRING" cannot be cast to "INT"
+
+# DO THIS - Handle empty strings with WHEN condition
+floor_df = floor_df.withColumn(
+    "_numeric_str",
+    F.regexp_replace(F.col("FloorName"), "[^0-9]", "")
+).withColumn(
+    "FloorNumericPart",
+    F.when(
+        (F.col("_numeric_str").isNotNull()) & (F.col("_numeric_str") != ""),
+        F.col("_numeric_str").cast("int")
+    ).otherwise(F.lit(None).cast("int"))
+).drop("_numeric_str")
+
+# ExtWorkerId doesn't exist - skip or use WorkerId/WorkerCode
+```
+
+### Verification Pattern
+
+Before writing Gold notebooks, verify Silver column names:
+```python
+# Check actual columns in silver table
+silver_cols = spark.table("wakecap_prod.silver.silver_worker").columns
+print("Available columns:", silver_cols)
+
+# Or read from silver_tables.yml config
+import yaml
+with open("migration_project/pipelines/silver/config/silver_tables.yml") as f:
+    config = yaml.safe_load(f)
+    for table in config["tables"]:
+        if table["name"] == "silver_worker":
+            for col in table["columns"]:
+                print(f"{col['source']} -> {col['target']}")
+```
+
+### Impact on Views
+
+Views that depend on other Gold tables (`gold_vw_*` depending on `gold_fact_*`) must ensure the source Gold table:
+1. Exists and has been built successfully
+2. Contains the expected columns
+
+If a view fails, check if its source fact table was built correctly first.
+
+---
+
+## Critical: UUID Case Sensitivity in String Comparisons
+
+**Problem:** UUID strings from different sources may have different cases (lowercase vs uppercase). Spark string comparison is **case-sensitive**, causing joins to fail silently (0 rows matched) even when the UUIDs are logically the same.
+
+Common scenario:
+- TimescaleDB stores UUIDs in lowercase: `57eee601-8c8f-4b2a-9a1e-abc123456789`
+- SQL Server stores UUIDs in uppercase: `57EEE601-8C8F-4B2A-9A1E-ABC123456789`
+
+```python
+# DON'T DO THIS - Case-sensitive comparison fails to match
+project_lookup_df = project_df.select(
+    F.col("ProjectID").alias("dim_ProjectID"),
+    F.col("ExtProjectID").alias("dim_ExtProjectID")  # Uppercase UUIDs
+)
+
+# This join returns 0 rows even though the UUIDs are the same (different case)
+att_with_project = att_df.join(
+    project_lookup_df,
+    F.col("att.ProjectId") == F.col("dim_ExtProjectID"),  # lowercase vs UPPERCASE
+    "inner"
+)
+```
+
+**Solution:** Normalize both sides to the same case using `F.upper()` or `F.lower()`:
+
+```python
+# Normalize to uppercase for case-insensitive comparison
+att_with_project = att_df.alias("att").join(
+    project_lookup_df.alias("p"),
+    F.upper(F.col("att.ProjectId")) == F.upper(F.col("p.dim_ExtProjectID")),
+    "inner"
+)
+```
+
+**Alternative - Pre-normalize in the lookup DataFrame:**
+
+```python
+# Normalize once in the lookup, use in all joins
+project_lookup_df = project_df.select(
+    F.col("ProjectID").alias("dim_ProjectID"),
+    F.upper(F.col("ExtProjectID")).alias("dim_ExtProjectID_upper")
+)
+
+# Then normalize only the fact side in joins
+att_df.join(
+    project_lookup_df,
+    F.upper(F.col("ProjectId")) == F.col("dim_ExtProjectID_upper"),
+    "inner"
+)
+```
+
+**Debugging tip:** When joins return 0 rows unexpectedly, check sample values from both sides:
+
+```python
+# Debug: Check case of UUIDs
+fact_df.select(F.col("ProjectId")).distinct().show(5, truncate=False)
+dim_df.select(F.col("ExtProjectID")).distinct().show(5, truncate=False)
+```
+
+---
+
+## Critical: UUID vs BIGINT Type Mismatch in Joins
+
+**Problem:** When joining tables from different sources (e.g., TimescaleDB vs SQL Server), ID columns may have different types:
+- TimescaleDB uses **UUID strings** for primary/foreign keys
+- SQL Server uses **BIGINT** (auto-increment integers) for primary/foreign keys
+- Spark attempts implicit casting during joins, leading to `CAST_INVALID_INPUT` errors
+
+Error message:
+```
+[CAST_INVALID_INPUT] The value 'ebc12fc8-7749-49ff-8bee-8ab4cec3d10b' of the type "STRING" cannot be cast to "BIGINT" because it is malformed. Correct the value as per the syntax, or change its target type. Use `try_cast` to tolerate malformed input and return NULL instead. SQLSTATE: 22018
+```
+
+**Root Cause:** Different tables in the Silver layer may have ID columns stored as different types:
+- `silver_crew.CrewTypeId` → UUID string (from timescale_crew.CrewTypeId)
+- `silver_crew_type.CrewTypeId` → Could be BIGINT (from timescale_crewtype.Id)
+
+When Spark joins these columns, it tries to cast the UUID string to BIGINT, which fails.
+
+### Solution: Cast Both Sides to STRING
+
+Always cast both sides of ID column joins to STRING for safe comparison:
+
+```python
+# DON'T DO THIS - May fail with type mismatch
+crew_df = crew_df.join(
+    crew_type_df,
+    F.col("CrewTypeId") == F.col("ct_CrewTypeId"),
+    "left"
+)
+
+# DO THIS - Cast to string for safe comparison
+crew_type_df = spark.table(SOURCE_CREW_TYPE).select(
+    F.col("CrewTypeId").cast("string").alias("ct_CrewTypeId"),  # Cast to string
+    F.col("CrewTypeName")
+)
+
+crew_df = crew_df.join(
+    crew_type_df,
+    F.col("CrewTypeId").cast("string") == F.col("ct_CrewTypeId"),  # Cast both sides
+    "left"
+).drop("ct_CrewTypeId")
+```
+
+### Apply to All ID Column Joins
+
+This pattern should be applied consistently to all ID column joins:
+
+```python
+# ProjectId joins
+F.col("ProjectId").cast("string") == F.col("p_ProjectId").cast("string")
+
+# WorkerId joins
+F.col("WorkerId").cast("string") == F.col("w_WorkerId").cast("string")
+
+# FloorId joins
+F.col("FloorId").cast("string") == F.col("f_FloorId").cast("string")
+
+# ZoneId joins
+F.col("ZoneId").cast("string") == F.col("z_ZoneId").cast("string")
+
+# DeviceId joins
+F.col("DeviceId").cast("string") == F.col("d_DeviceId").cast("string")
+
+# CrewId joins
+F.col("CrewId").cast("string") == F.col("c_CrewId").cast("string")
+
+# Any foreign key ID joins
+F.col("ForeignKeyId").cast("string") == F.col("fk_Id").cast("string")
+```
+
+### Full Example Pattern
+
+```python
+# Add worker details
+# Note: IDs may be UUID (string) or BIGINT - cast to string for safe comparison
+if opt_status.get("Worker"):
+    worker_df = spark.table(SOURCE_WORKER).select(
+        F.col("WorkerId").cast("string").alias("w_WorkerId"),
+        F.col("WorkerName"),
+        F.col("WorkerCode")
+    )
+
+    hist_df = hist_df.join(
+        worker_df,
+        F.col("WorkerId").cast("string") == F.col("w_WorkerId"),
+        "left"
+    ).drop("w_WorkerId")
+    print("[OK] Worker details joined")
+```
+
+### When to Use This Pattern
+
+- **Always** when joining ID columns between Silver layer tables
+- **Always** when joining Gold tables with Silver dimension tables
+- **Especially** when source data comes from different databases (TimescaleDB, SQL Server, PostgreSQL)
+- **Even if** you think both columns should be the same type (data sources may have inconsistencies)
