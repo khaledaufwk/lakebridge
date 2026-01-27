@@ -13,8 +13,8 @@
 
 | Job Name | Job ID | Purpose | Schedule |
 |----------|--------|---------|----------|
-| **WakeCapDW_Bronze_TimescaleDB_Raw** | 28181369160316 | Bronze layer ingestion | 2:00 AM UTC |
-| **WakeCapDW_Silver_TimescaleDB** | 181959206191493 | Silver transformations (9 tasks) | 3:00 AM UTC |
+| **WakeCapDW_Bronze** | 28181369160316 | Bronze layer ingestion | 2:00 AM UTC |
+| **WakeCapDW_Silver** | 181959206191493 | Silver transformations (9 tasks) | 3:00 AM UTC |
 | **WakeCapDW_Gold** | 933934272544045 | Gold facts (7 tasks) | 5:30 AM UTC |
 
 **Do NOT create new standalone jobs.** All work should be consolidated into these three jobs.
@@ -72,7 +72,7 @@ The initial load of the Bronze layer from TimescaleDB to Databricks Unity Catalo
 | **Total Tables Loaded** | 78 |
 | **Table Prefix** | timescale_* |
 | **Load Method** | JDBC with watermark-based incremental |
-| **Job Name** | WakeCapDW_Bronze_TimescaleDB_Raw |
+| **Job Name** | WakeCapDW_Bronze |
 
 ### Table Categories Loaded
 
@@ -179,7 +179,7 @@ The Silver layer transformation pipeline has been **DEPLOYED** as a standalone D
 | **Source Schema** | wakecap_prod.raw (Bronze) |
 | **Target Schema** | wakecap_prod.silver |
 | **Total Silver Tables** | 77 |
-| **Job Name** | WakeCapDW_Silver_TimescaleDB |
+| **Job Name** | WakeCapDW_Silver |
 | **Job ID** | 181959206191493 |
 | **Schedule** | Daily 3:00 AM UTC (Paused) |
 | **Load Method** | Watermark-based incremental from Bronze `_loaded_at` |

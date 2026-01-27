@@ -10,8 +10,8 @@ For the WakeCapDW migration specifically, **all work must be added to these thre
 
 | Job Name | Job ID | Purpose | Schedule |
 |----------|--------|---------|----------|
-| **WakeCapDW_Bronze_TimescaleDB_Raw** | 28181369160316 | Bronze layer ingestion | 2:00 AM UTC |
-| **WakeCapDW_Silver_TimescaleDB** | 181959206191493 | Silver transformations | 3:00 AM UTC |
+| **WakeCapDW_Bronze** | 28181369160316 | Bronze layer ingestion | 2:00 AM UTC |
+| **WakeCapDW_Silver** | 181959206191493 | Silver transformations | 3:00 AM UTC |
 | **WakeCapDW_Gold** | 933934272544045 | Gold facts | 5:30 AM UTC |
 
 See `migration_project/DEPLOYMENT_GUIDE.md` for WakeCapDW-specific details.

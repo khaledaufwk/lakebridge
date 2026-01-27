@@ -10,8 +10,8 @@ This guide provides step-by-step instructions for deploying the WakeCapDW migrat
 
 | Job Name | Job ID | Purpose | Schedule | Workspace Path |
 |----------|--------|---------|----------|----------------|
-| **WakeCapDW_Bronze_TimescaleDB_Raw** | 28181369160316 | Bronze layer ingestion from TimescaleDB | 2:00 AM UTC | `/Workspace/migration_project/pipelines/timescaledb/notebooks/` |
-| **WakeCapDW_Silver_TimescaleDB** | 181959206191493 | Silver layer transformations (9 tasks) | 3:00 AM UTC | `/Workspace/migration_project/pipelines/silver/notebooks/` |
+| **WakeCapDW_Bronze** | 28181369160316 | Bronze layer ingestion from TimescaleDB | 2:00 AM UTC | `/Workspace/migration_project/pipelines/timescaledb/notebooks/` |
+| **WakeCapDW_Silver** | 181959206191493 | Silver layer transformations (9 tasks) | 3:00 AM UTC | `/Workspace/migration_project/pipelines/silver/notebooks/` |
 | **WakeCapDW_Gold** | 933934272544045 | Gold layer facts and aggregations (7 tasks) | 5:30 AM UTC | `/Workspace/migration_project/pipelines/gold/notebooks/` |
 
 ### Job URLs
@@ -42,10 +42,10 @@ When adding new notebooks or transformations:
 ### Pipeline Execution Order
 
 ```
-WakeCapDW_Bronze_TimescaleDB_Raw (2:00 AM UTC)
+WakeCapDW_Bronze (2:00 AM UTC)
          │
          ▼
-WakeCapDW_Silver_TimescaleDB (3:00 AM UTC)
+WakeCapDW_Silver (3:00 AM UTC)
          │
          ▼
 WakeCapDW_Gold (5:30 AM UTC)
@@ -178,7 +178,7 @@ Create the Databricks job for bronze layer loading:
 
 ```bash
 databricks jobs create --json '{
-  "name": "WakeCapDW_Bronze_TimescaleDB_Raw",
+  "name": "WakeCapDW_Bronze",
   "tasks": [
     {
       "task_key": "bronze_load_all",
@@ -215,7 +215,7 @@ databricks jobs create --json '{
 ### 1.4 Run Initial Full Load
 
 1. Open Databricks > Workflows > Jobs
-2. Find "WakeCapDW_Bronze_TimescaleDB_Raw"
+2. Find "WakeCapDW_Bronze"
 3. Click "Run Now" with parameters:
    - `load_mode`: "full" (for initial load)
    - `category`: "ALL"
@@ -257,7 +257,7 @@ FROM wakecap_prod.migration._timescaledb_watermarks;
 
 Use the monitoring script:
 ```bash
-python monitor_pipeline.py --job-name "WakeCapDW_Bronze_TimescaleDB_Raw"
+python monitor_pipeline.py --job-name "WakeCapDW_Bronze"
 ```
 
 Or check watermarks:
@@ -386,7 +386,7 @@ The following SQL Server `stg.wc2023_*` tables are **NOT** in the Bronze layer:
 |--------|-------|
 | Tables Deployed | 77 |
 | Target Schema | wakecap_prod.silver |
-| Job Name | WakeCapDW_Silver_TimescaleDB |
+| Job Name | WakeCapDW_Silver |
 | Job ID | 181959206191493 |
 | Load Method | Watermark-based incremental from Bronze `_loaded_at` |
 | Schedule | Daily 3:00 AM UTC (Paused initially) |
@@ -466,7 +466,7 @@ silver_organization ──> silver_project ─┘                               
 ### 2.3 Run Initial Load
 
 1. Open Databricks > Workflows > Jobs
-2. Find "WakeCapDW_Silver_TimescaleDB" (Job ID: 181959206191493)
+2. Find "WakeCapDW_Silver" (Job ID: 181959206191493)
 3. Click "Run Now"
 4. Monitor task execution in the Runs tab
 
@@ -746,7 +746,7 @@ SELECT 'gold_manager_assignment_snapshots', COUNT(*) FROM wakecap_prod.gold.gold
 ### 5.2 Schedule Incremental Updates
 
 **Bronze Layer (TimescaleDB):**
-1. Job "WakeCapDW_Bronze_TimescaleDB_Raw" is scheduled daily at 2:00 AM UTC
+1. Job "WakeCapDW_Bronze" is scheduled daily at 2:00 AM UTC
 2. Uses watermark-based incremental extraction
 3. Parameters: `load_mode=incremental`, `category=ALL`
 
@@ -841,7 +841,7 @@ SET ROW FILTER security.organization_filter ON (OrganizationID);
 │  ┌─────────────────────────────────────────────────────────────────────┐ │
 │  │  BRONZE LAYER (wakecap_prod.raw)                                    │ │
 │  │  - 78 tables: timescale_*                                           │ │
-│  │  - Job: WakeCapDW_Bronze_TimescaleDB_Raw                            │ │
+│  │  - Job: WakeCapDW_Bronze                            │ │
 │  │  - Schedule: Daily 2:00 AM UTC                                      │ │
 │  │  - Watermarks: _timescaledb_watermarks                              │ │
 │  └─────────────────────────────────────────────────────────────────────┘ │
@@ -851,7 +851,7 @@ SET ROW FILTER security.organization_filter ON (OrganizationID);
 │  ┌─────────────────────────────────────────────────────────────────────┐ │
 │  │  SILVER LAYER (wakecap_prod.silver)                      DEPLOYED   │ │
 │  │  - 77 tables: silver_*                                              │ │
-│  │  - Job: WakeCapDW_Silver_TimescaleDB (ID: 181959206191493)          │ │
+│  │  - Job: WakeCapDW_Silver (ID: 181959206191493)          │ │
 │  │  - Schedule: Daily 3:00 AM UTC                                      │ │
 │  │  - 8 tasks with dependency chain                                    │ │
 │  │  - 3-tier DQ validation (critical/business/advisory)                │ │
@@ -875,8 +875,8 @@ SET ROW FILTER security.organization_filter ON (OrganizationID);
 
 | Job | Job ID | Schedule | Purpose |
 |-----|--------|----------|---------|
-| WakeCapDW_Bronze_TimescaleDB_Raw | 28181369160316 | 2:00 AM UTC | Bronze layer from TimescaleDB |
-| WakeCapDW_Silver_TimescaleDB | 181959206191493 | 3:00 AM UTC | Silver layer transformations |
+| WakeCapDW_Bronze | 28181369160316 | 2:00 AM UTC | Bronze layer from TimescaleDB |
+| WakeCapDW_Silver | 181959206191493 | 3:00 AM UTC | Silver layer transformations |
 | WakeCapDW_Gold | 933934272544045 | 5:30 AM UTC | Gold layer facts |
 
 **⚠️ All future work must be added to one of these three jobs. Do not create new standalone jobs.**

@@ -11,8 +11,8 @@
 
 | Job Name | Job ID | Purpose | Schedule |
 |----------|--------|---------|----------|
-| **WakeCapDW_Bronze_TimescaleDB_Raw** | 28181369160316 | Bronze layer ingestion | 2:00 AM UTC |
-| **WakeCapDW_Silver_TimescaleDB** | 181959206191493 | Silver transformations (9 tasks) | 3:00 AM UTC |
+| **WakeCapDW_Bronze** | 28181369160316 | Bronze layer ingestion | 2:00 AM UTC |
+| **WakeCapDW_Silver** | 181959206191493 | Silver transformations (9 tasks) | 3:00 AM UTC |
 | **WakeCapDW_Gold** | 933934272544045 | Gold facts (7 tasks) | 5:30 AM UTC |
 
 **Do NOT create new standalone jobs.** All work should be consolidated into these three jobs.
@@ -44,7 +44,7 @@ This plan outlines the work required to complete the migration of WakeCapDW to D
 - **22 tables** match SQL Server stg.wc2023_* tables
 - **56 tables** are TimescaleDB-only (new data sources)
 
-**Job Name:** `WakeCapDW_Bronze_TimescaleDB_Raw`
+**Job Name:** `WakeCapDW_Bronze`
 **Loader:** `TimescaleDBLoaderV2` (pipelines/timescaledb/src/timescaledb_loader_v2.py)
 
 ### Architecture Overview
@@ -73,7 +73,7 @@ This plan outlines the work required to complete the migration of WakeCapDW to D
 
 | Parameter | Value |
 |-----------|-------|
-| Job Name | `WakeCapDW_Bronze_TimescaleDB_Raw` |
+| Job Name | `WakeCapDW_Bronze` |
 | Schedule | Daily at 2:00 AM UTC (`0 0 2 * * ?`) |
 | Cluster | Standard_DS3_v2, 2 workers |
 | Notebook | `/Workspace/migration_project/pipelines/timescaledb/notebooks/bronze_loader_optimized` |
@@ -409,7 +409,7 @@ The bronze loader notebook accepts these parameters:
 #### Via Databricks UI
 
 1. Navigate to Workflows > Jobs
-2. Find `WakeCapDW_Bronze_TimescaleDB_Raw`
+2. Find `WakeCapDW_Bronze`
 3. Click "Run Now"
 4. Set parameters:
    - `load_mode`: "incremental" (or "full" for initial load)
@@ -436,7 +436,7 @@ databricks jobs run-now --job-id <job-id> \
 ```bash
 python run_bronze_all.py
 # or
-python monitor_pipeline.py --job-name "WakeCapDW_Bronze_TimescaleDB_Raw"
+python monitor_pipeline.py --job-name "WakeCapDW_Bronze"
 ```
 
 ### 1.12 Monitoring & Verification
@@ -750,7 +750,7 @@ The Silver layer has been deployed as a standalone Databricks Job with 77 tables
 
 | Metric | Value |
 |--------|-------|
-| **Job Name** | WakeCapDW_Silver_TimescaleDB |
+| **Job Name** | WakeCapDW_Silver |
 | **Job ID** | 181959206191493 |
 | **Target Schema** | wakecap_prod.silver |
 | **Total Tables** | 77 |
@@ -976,8 +976,8 @@ Compare key aggregations:
 
 | Job | Schedule | Description |
 |-----|----------|-------------|
-| WakeCapDW_Bronze_TimescaleDB_Raw | Daily 2:00 AM UTC | Incremental bronze load (78 tables) |
-| **WakeCapDW_Silver_TimescaleDB** | **Daily 3:00 AM UTC** | **Silver layer transformations (77 tables)** |
+| WakeCapDW_Bronze | Daily 2:00 AM UTC | Incremental bronze load (78 tables) |
+| **WakeCapDW_Silver** | **Daily 3:00 AM UTC** | **Silver layer transformations (77 tables)** |
 | Bronze_DeviceLocation | On-demand / After main job | Dedicated loader for large DeviceLocation tables |
 | DLT Pipeline (Gold) | Every 4 hours | Gold layer views |
 | Validation Job | Weekly | Data reconciliation |
