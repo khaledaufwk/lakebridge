@@ -14,9 +14,10 @@
 # MAGIC - MERGE with INSERT/UPDATE/DELETE -> Two-phase DeltaTable merge
 # MAGIC - Date interval intersection (GREATEST/LEAST) -> greatest()/least() functions
 # MAGIC
-# MAGIC **Source Tables:**
-# MAGIC - `wakecap_prod.silver.silver_manager_assignments_expanded` (dbo.vwManagerAssignments_Expanded)
-# MAGIC - `wakecap_prod.silver.silver_crew_composition` (dbo.vwCrewAssignments)
+# MAGIC **Source Table:**
+# MAGIC - `wakecap_prod.silver.silver_manager_assignments_expanded` (equivalent to dbo.vwManagerAssignments_Expanded)
+# MAGIC
+# MAGIC **Dependency:** Run `silver_manager_assignments_expanded` notebook first to create the source table.
 # MAGIC
 # MAGIC **Target:** `wakecap_prod.gold.gold_manager_assignment_snapshots`
 # MAGIC **Watermarks:** `wakecap_prod.migration._gold_watermarks`
@@ -42,11 +43,9 @@ SILVER_SCHEMA = "silver"
 GOLD_SCHEMA = "gold"
 MIGRATION_SCHEMA = "migration"
 
-# Source tables (Silver layer equivalents of the views)
-# Note: vwManagerAssignments_Expanded -> silver_crew_manager joined with silver_crew_composition
-# In this simplified model, we use silver_crew_manager as the manager assignments source
-SOURCE_MANAGER_ASSIGNMENTS = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_crew_manager"
-SOURCE_CREW_COMPOSITION = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_crew_composition"
+# Source table - Silver layer expanded view (created by silver_manager_assignments_expanded notebook)
+# This replaces the inline join of silver_crew_manager and silver_crew_composition
+SOURCE_EXPANDED_ASSIGNMENTS = f"{TARGET_CATALOG}.{SILVER_SCHEMA}.silver_manager_assignments_expanded"
 
 # Target table
 TARGET_TABLE = f"{TARGET_CATALOG}.{GOLD_SCHEMA}.gold_manager_assignment_snapshots"
@@ -55,8 +54,7 @@ WATERMARK_TABLE = f"{TARGET_CATALOG}.{MIGRATION_SCHEMA}._gold_watermarks"
 # Maximum hierarchy level (matches original SP: Level < 12)
 MAX_HIERARCHY_LEVEL = 12
 
-print(f"Source Manager Assignments: {SOURCE_MANAGER_ASSIGNMENTS}")
-print(f"Source Crew Composition: {SOURCE_CREW_COMPOSITION}")
+print(f"Source: {SOURCE_EXPANDED_ASSIGNMENTS}")
 print(f"Target: {TARGET_TABLE}")
 
 # COMMAND ----------
@@ -82,18 +80,13 @@ print("=" * 60)
 print("PRE-FLIGHT CHECK")
 print("=" * 60)
 
-# Check source tables
-source_tables = [
-    ("Manager Assignments", SOURCE_MANAGER_ASSIGNMENTS),
-    ("Crew Composition", SOURCE_CREW_COMPOSITION),
-]
-
-for name, table in source_tables:
-    try:
-        spark.sql(f"SELECT 1 FROM {table} LIMIT 0")
-        print(f"[OK] {name} exists: {table}")
-    except Exception as e:
-        print(f"[WARN] {name} not found: {table} - {str(e)[:50]}")
+# Check source table (silver_manager_assignments_expanded)
+try:
+    spark.sql(f"SELECT 1 FROM {SOURCE_EXPANDED_ASSIGNMENTS} LIMIT 0")
+    print(f"[OK] Source exists: {SOURCE_EXPANDED_ASSIGNMENTS}")
+except Exception as e:
+    print(f"[FATAL] Source not found: {SOURCE_EXPANDED_ASSIGNMENTS}")
+    dbutils.notebook.exit(f"SOURCE_NOT_FOUND: {SOURCE_EXPANDED_ASSIGNMENTS}")
 
 # Ensure target schemas exist
 spark.sql(f"CREATE SCHEMA IF NOT EXISTS {TARGET_CATALOG}.{GOLD_SCHEMA}")
@@ -159,75 +152,42 @@ print("=" * 60)
 print("STEP 1: Calculate Impacted Area")
 print("=" * 60)
 
-# Get watermarks
-last_mgr_watermark = get_watermark("sql_CalculateManagerAssignmentSnapshots")
-last_crew_watermark = get_watermark("sql_CrewAssignments[tracked for mgr snapshots]")
+# Get watermark
+last_watermark = get_watermark("gold_manager_assignment_snapshots")
+print(f"Last Watermark: {last_watermark}")
 
-print(f"Last Manager Watermark: {last_mgr_watermark}")
-print(f"Last Crew Watermark: {last_crew_watermark}")
+# Load expanded assignments from silver layer
+expanded_assignments_df = spark.table(SOURCE_EXPANDED_ASSIGNMENTS)
+expanded_count = expanded_assignments_df.count()
+print(f"Loaded expanded assignments: {expanded_count:,} rows")
 
-# Load manager assignments
-try:
-    manager_assignments_df = spark.table(SOURCE_MANAGER_ASSIGNMENTS)
-    print(f"Loaded manager assignments: {manager_assignments_df.count()} rows")
-except Exception as e:
-    print(f"[FATAL] Cannot load manager assignments: {str(e)}")
-    dbutils.notebook.exit(f"SOURCE_NOT_FOUND: {SOURCE_MANAGER_ASSIGNMENTS}")
+if expanded_count == 0:
+    print("No expanded assignments found. Exiting.")
+    dbutils.notebook.exit("NO_SOURCE_DATA")
 
-# Get new watermark
-new_mgr_watermark = manager_assignments_df.agg(F.max("UpdatedAt")).collect()[0][0]
-if new_mgr_watermark is None:
-    new_mgr_watermark = datetime.now()
-print(f"New Manager Watermark: {new_mgr_watermark}")
-
-# Load crew composition
-try:
-    crew_composition_df = spark.table(SOURCE_CREW_COMPOSITION)
-    new_crew_watermark = crew_composition_df.agg(F.max("UpdatedAt")).collect()[0][0]
-    if new_crew_watermark is None:
-        new_crew_watermark = datetime.now()
-    print(f"New Crew Watermark: {new_crew_watermark}")
-except Exception as e:
-    print(f"[WARN] Cannot load crew composition: {str(e)}")
-    crew_composition_df = None
-    new_crew_watermark = datetime.now()
+# Get new watermark from source
+new_watermark = expanded_assignments_df.agg(F.max("UpdatedAt")).collect()[0][0]
+if new_watermark is None:
+    new_watermark = datetime.now()
+print(f"New Watermark: {new_watermark}")
 
 # COMMAND ----------
 
 # Calculate impacted area based on incremental logic
 if load_mode == "incremental":
-    # Filter manager assignments by watermark
-    # Original: WatermarkUTC > @LastWatermark AND (WatermarkUTC <= @NewWatermark OR @NewWatermark IS NULL)
-    mgr_changes = manager_assignments_df.filter(
-        (F.col("UpdatedAt") > F.lit(last_mgr_watermark)) &
-        (F.col("UpdatedAt") <= F.lit(new_mgr_watermark))
+    # Filter expanded assignments by watermark to find changed records
+    changes = expanded_assignments_df.filter(
+        (F.col("UpdatedAt") > F.lit(last_watermark)) &
+        (F.col("UpdatedAt") <= F.lit(new_watermark))
     ).select(
         F.col("ProjectId"),
-        F.col("ManagerId").alias("WorkerId"),  # In crew_manager, ManagerId is the worker being assigned as manager
-        F.col("EffectiveDate").alias("ValidFrom_ShiftLocalDate"),
-        F.lit(None).cast("date").alias("ValidTo_ShiftLocalDate")  # Open-ended for current managers
+        F.col("WorkerId"),
+        F.col("ValidFrom_ShiftLocalDate"),
+        F.col("ValidTo_ShiftLocalDate")
     )
 
-    # Filter crew composition changes
-    if crew_composition_df is not None:
-        crew_changes = crew_composition_df.filter(
-            (F.col("UpdatedAt") > F.lit(last_crew_watermark)) &
-            (F.col("UpdatedAt") <= F.lit(new_crew_watermark)) &
-            (F.col("UpdatedAt") > F.lit(last_mgr_watermark))  # Additional filter from original SP
-        ).select(
-            F.col("ProjectId"),
-            F.col("WorkerId"),
-            F.col("CreatedAt").cast("date").alias("ValidFrom_ShiftLocalDate"),
-            F.date_add(F.coalesce(F.col("DeletedAt").cast("date"), F.current_date()), 1).alias("ValidTo_ShiftLocalDate")
-        )
-
-        # Union changes
-        all_changes = mgr_changes.union(crew_changes)
-    else:
-        all_changes = mgr_changes
-
     # Group to get impacted area (ProjectID, WorkerID, MinDate, MaxDate)
-    impacted_area = all_changes.groupBy("ProjectId", "WorkerId").agg(
+    impacted_area = changes.groupBy("ProjectId", "WorkerId").agg(
         F.min("ValidFrom_ShiftLocalDate").alias("MinLocalDate"),
         F.max("ValidTo_ShiftLocalDate").alias("MaxLocalDate")
     )
@@ -240,9 +200,9 @@ if load_mode == "incremental":
         dbutils.notebook.exit("No changes to process")
 else:
     # Full load: all workers are impacted
-    impacted_area = manager_assignments_df.select(
+    impacted_area = expanded_assignments_df.select(
         F.col("ProjectId"),
-        F.col("ManagerId").alias("WorkerId")
+        F.col("WorkerId")
     ).distinct().withColumn(
         "MinLocalDate", F.lit("1900-01-01").cast("date")
     ).withColumn(
@@ -251,73 +211,35 @@ else:
     print(f"Full load: {impacted_area.count()} workers/projects")
 
 # Apply project filter if specified
+# Note: ProjectId is a string in these tables
 if project_filter:
-    impacted_area = impacted_area.filter(F.col("ProjectId") == int(project_filter))
+    impacted_area = impacted_area.filter(F.col("ProjectId") == project_filter)
     print(f"Filtered to project_id: {project_filter}")
 
-impacted_area = impacted_area.cache()
+# Note: cache() removed for serverless compute compatibility
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## Step 2: Load Base DataFrames (#ca, #ca2)
+# MAGIC ## Step 2: Build Base DataFrames (#ca, #ca2)
 # MAGIC
+# MAGIC Using silver_manager_assignments_expanded table:
 # MAGIC - `#ca`: Manager assignments for impacted workers only
 # MAGIC - `#ca2`: All manager assignments for impacted projects (needed for hierarchy walk)
 
 # COMMAND ----------
 
 print("=" * 60)
-print("STEP 2: Load Base DataFrames")
+print("STEP 2: Build Base DataFrames")
 print("=" * 60)
 
-# Build the expanded manager assignments view
-# Original view joins CrewManager with CrewComposition to get worker -> manager relationships
-# For now, we'll create a simplified version using crew_manager and crew_composition
-
-# Get workers from crew composition (who has a manager)
-workers_df = crew_composition_df.filter(
-    F.col("DeletedAt").isNull()
-).select(
-    F.col("ProjectId"),
-    F.col("CrewId"),
-    F.col("WorkerId")
-).distinct()
-
-# Join with managers
-# CrewManager links CrewId to ManagerId (ManagerId is a WorkerId who manages the crew)
-managers_df = manager_assignments_df.filter(
-    F.col("DeletedAt").isNull()
-).select(
-    F.col("ProjectId"),
-    F.col("CrewId"),
-    F.col("ManagerId").alias("ManagerWorkerId"),
-    F.col("EffectiveDate").alias("ValidFrom_ShiftLocalDate")
-).withColumn(
-    "ValidTo_ShiftLocalDate", F.lit(None).cast("date")  # Current assignments are open-ended
-)
-
-# Create expanded assignments: Worker -> Manager relationships via Crew
-expanded_assignments = workers_df.alias("w").join(
-    managers_df.alias("m"),
-    (F.col("w.ProjectId") == F.col("m.ProjectId")) &
-    (F.col("w.CrewId") == F.col("m.CrewId")),
-    "inner"
-).select(
-    F.col("w.ProjectId"),
-    F.col("w.CrewId"),
-    F.col("w.WorkerId"),
-    F.col("m.ManagerWorkerId"),
-    F.col("m.ValidFrom_ShiftLocalDate"),
-    F.col("m.ValidTo_ShiftLocalDate")
-)
-
-print(f"Expanded assignments: {expanded_assignments.count()} rows")
+# Use expanded assignments from silver layer (already joined)
+print(f"Using silver_manager_assignments_expanded: {expanded_count:,} rows")
 
 # #ca: Manager assignments for impacted workers
 # Original: SELECT mae.* FROM dbo.vwManagerAssignments_Expanded mae
 #           INNER JOIN @ImpactedArea ia ON mae.ProjectID = ia.ProjectID AND mae.WorkerID = ia.WorkerID
-ca_df = expanded_assignments.alias("mae").join(
+ca_df = expanded_assignments_df.alias("mae").join(
     impacted_area.alias("ia"),
     (F.col("mae.ProjectId") == F.col("ia.ProjectId")) &
     (F.col("mae.WorkerId") == F.col("ia.WorkerId")),
@@ -331,15 +253,20 @@ ca_df = expanded_assignments.alias("mae").join(
     F.col("mae.ValidTo_ShiftLocalDate")
 )
 
-ca_df = ca_df.cache()
-print(f"#ca (impacted workers): {ca_df.count()} rows")
+ca_count = ca_df.count()
+print(f"#ca (impacted workers): {ca_count} rows")
+
+# Early exit if no impacted worker assignments
+if ca_count == 0:
+    print("No manager assignments found for impacted workers. Exiting.")
+    dbutils.notebook.exit("No assignments to process")
 
 # #ca2: All manager assignments for impacted projects
 # Original: SELECT mae.* FROM dbo.vwManagerAssignments_Expanded mae
 #           WHERE ProjectID IN (SELECT DISTINCT ProjectID FROM @ImpactedArea)
 impacted_projects = impacted_area.select("ProjectId").distinct()
 
-ca2_df = expanded_assignments.alias("mae").join(
+ca2_df = expanded_assignments_df.alias("mae").join(
     impacted_projects.alias("ip"),
     F.col("mae.ProjectId") == F.col("ip.ProjectId"),
     "inner"
@@ -352,7 +279,6 @@ ca2_df = expanded_assignments.alias("mae").join(
     F.col("mae.ValidTo_ShiftLocalDate")
 )
 
-ca2_df = ca2_df.cache()
 print(f"#ca2 (all project assignments): {ca2_df.count()} rows")
 
 # COMMAND ----------
@@ -402,7 +328,13 @@ level1 = ca_df.filter(
     F.lit(1).alias("Level")
 )
 
-print(f"Level 1 (direct managers): {level1.count()} rows")
+level1_count = level1.count()
+print(f"Level 1 (direct managers): {level1_count} rows")
+
+# Early exit if no direct managers found
+if level1_count == 0:
+    print("No direct manager relationships found. Exiting.")
+    dbutils.notebook.exit("No manager relationships to process")
 
 # Accumulate all levels
 all_levels = level1
@@ -463,7 +395,7 @@ for level_num in range(2, MAX_HIERARCHY_LEVEL + 1):
 
 # Filter to only include records with non-null managers (matches original: WHERE ManagerWorkerID IS NOT NULL)
 unpivoted_df = all_levels.filter(F.col("ManagerWorkerId").isNotNull())
-unpivoted_df = unpivoted_df.cache()
+# unpivoted_df cache removed for serverless compatibility
 
 total_unpivoted = unpivoted_df.count()
 print(f"\nTotal unpivoted rows: {total_unpivoted}")
@@ -520,7 +452,7 @@ boundaries_df = all_boundaries.withColumn(
     F.lead("Boundary").over(boundary_window)
 )
 
-boundaries_df = boundaries_df.cache()
+# boundaries_df cache removed for serverless compatibility
 print(f"Boundary records: {boundaries_df.count()}")
 
 # COMMAND ----------
@@ -642,7 +574,7 @@ result_df = pivoted_df.select(
     F.current_timestamp()
 )
 
-result_df = result_df.cache()
+# result_df cache removed for serverless compatibility
 result_count = result_df.count()
 print(f"Result records: {result_count}")
 
@@ -751,19 +683,22 @@ if target_exists:
     print("  Phase A completed")
 
     # Phase B: DELETE for NOT MATCHED BY SOURCE (anti-join pattern)
+    # Note: Delta Lake doesn't support multi-column IN predicates, so use EXISTS pattern
     print("\nPhase B: DELETE NOT MATCHED BY SOURCE...")
 
-    # Find records in target that are NOT in source for impacted workers
+    # Find records in target that are in impacted area but NOT in source
     delete_sql = f"""
         DELETE FROM {TARGET_TABLE}
-        WHERE (ProjectId, WorkerId, ValidFrom_ShiftLocalDate) IN (
-            SELECT t.ProjectId, t.WorkerId, t.ValidFrom_ShiftLocalDate
-            FROM {TARGET_TABLE} t
-            INNER JOIN impacted_area_view ia ON t.ProjectId = ia.ProjectId AND t.WorkerId = ia.WorkerId
-            LEFT JOIN merge_source_view s ON t.ProjectId = s.ProjectId
-                AND t.WorkerId = s.WorkerId
-                AND t.ValidFrom_ShiftLocalDate = s.ValidFrom_ShiftLocalDate
-            WHERE s.ProjectId IS NULL
+        WHERE EXISTS (
+            SELECT 1 FROM impacted_area_view ia
+            WHERE {TARGET_TABLE}.ProjectId = ia.ProjectId
+              AND {TARGET_TABLE}.WorkerId = ia.WorkerId
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM merge_source_view s
+            WHERE {TARGET_TABLE}.ProjectId = s.ProjectId
+              AND {TARGET_TABLE}.WorkerId = s.WorkerId
+              AND {TARGET_TABLE}.ValidFrom_ShiftLocalDate = s.ValidFrom_ShiftLocalDate
         )
     """
 
@@ -798,14 +733,12 @@ print("=" * 60)
 print("STEP 7: Update Watermarks")
 print("=" * 60)
 
-# Update watermarks
+# Update watermark
 final_count = spark.table(TARGET_TABLE).count()
 
-update_watermark("sql_CalculateManagerAssignmentSnapshots", new_mgr_watermark, final_count)
-update_watermark("sql_CrewAssignments[tracked for mgr snapshots]", new_crew_watermark, final_count)
+update_watermark("gold_manager_assignment_snapshots", new_watermark, final_count)
 
-print(f"Updated Manager Watermark to: {new_mgr_watermark}")
-print(f"Updated Crew Watermark to: {new_crew_watermark}")
+print(f"Updated Watermark to: {new_watermark}")
 print(f"Total records in target: {final_count}")
 
 # COMMAND ----------
@@ -857,13 +790,7 @@ display(spark.table(TARGET_TABLE).limit(10))
 
 # COMMAND ----------
 
-# Clean up cached DataFrames
-ca_df.unpersist()
-ca2_df.unpersist()
-unpivoted_df.unpersist()
-boundaries_df.unpersist()
-result_df.unpersist()
-impacted_area.unpersist()
+# Note: cache/unpersist removed for serverless compatibility
 
 # Final summary
 print("=" * 60)
@@ -872,17 +799,19 @@ print("=" * 60)
 print(f"""
 Processing Summary:
   Load Mode:                {load_mode}
-  Impacted Workers:         {impacted_area.count() if 'impacted_area' in dir() else 'N/A'}
+  Source Records:           {expanded_count if 'expanded_count' in dir() else 'N/A'}
   Unpivoted Records:        {total_unpivoted if 'total_unpivoted' in dir() else 'N/A'}
   Result Records:           {result_count if 'result_count' in dir() else 'N/A'}
+
+Source Table:
+  {SOURCE_EXPANDED_ASSIGNMENTS}
 
 Target Table:
   {TARGET_TABLE}
   Total rows: {final_count:,}
 
-Watermarks Updated:
-  - sql_CalculateManagerAssignmentSnapshots: {new_mgr_watermark}
-  - sql_CrewAssignments[tracked for mgr snapshots]: {new_crew_watermark}
+Watermark Updated:
+  - gold_manager_assignment_snapshots: {new_watermark}
 
 Converted from: stg.spCalculateManagerAssignmentSnapshots (266 lines)
 Patterns: RECURSIVE CTE -> Iterative loop, PIVOT, Two-phase MERGE

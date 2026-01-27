@@ -28,19 +28,9 @@ CATALOG = "wakecap_prod"
 # Notebooks to deploy - organized by layer and execution order
 SILVER_NOTEBOOKS = [
     {
-        "name": "silver_dim_organization",
-        "local_path": "migration_project/pipelines/silver/notebooks/silver_dim_organization.py",
-        "workspace_path": f"{WORKSPACE_BASE}/silver/silver_dim_organization",
-    },
-    {
-        "name": "silver_dim_project",
-        "local_path": "migration_project/pipelines/silver/notebooks/silver_dim_project.py",
-        "workspace_path": f"{WORKSPACE_BASE}/silver/silver_dim_project",
-    },
-    {
-        "name": "silver_dim_worker",
-        "local_path": "migration_project/pipelines/silver/notebooks/silver_dim_worker.py",
-        "workspace_path": f"{WORKSPACE_BASE}/silver/silver_dim_worker",
+        "name": "WakeCapDW_Silver_TimescaleDB",
+        "local_path": "migration_project/pipelines/silver/notebooks/WakeCapDW_Silver_TimescaleDB.py",
+        "workspace_path": f"{WORKSPACE_BASE}/silver/WakeCapDW_Silver_TimescaleDB",
     },
 ]
 
@@ -49,37 +39,37 @@ GOLD_NOTEBOOKS = [
         "name": "gold_fact_workers_history",
         "local_path": "migration_project/pipelines/gold/notebooks/gold_fact_workers_history.py",
         "workspace_path": f"{WORKSPACE_BASE}/gold/gold_fact_workers_history",
-        "depends_on": ["silver_dim_worker", "silver_dim_project"],
+        "depends_on": ["WakeCapDW_Silver_TimescaleDB"],
     },
     {
         "name": "gold_fact_weather_observations",
         "local_path": "migration_project/pipelines/gold/notebooks/gold_fact_weather_observations.py",
         "workspace_path": f"{WORKSPACE_BASE}/gold/gold_fact_weather_observations",
-        "depends_on": ["silver_dim_project"],
+        "depends_on": ["WakeCapDW_Silver_TimescaleDB"],
     },
     {
         "name": "gold_fact_reported_attendance",
         "local_path": "migration_project/pipelines/gold/notebooks/gold_fact_reported_attendance.py",
         "workspace_path": f"{WORKSPACE_BASE}/gold/gold_fact_reported_attendance",
-        "depends_on": ["silver_dim_worker", "silver_dim_project"],
+        "depends_on": ["WakeCapDW_Silver_TimescaleDB"],
     },
     {
         "name": "gold_fact_progress",
         "local_path": "migration_project/pipelines/gold/notebooks/gold_fact_progress.py",
         "workspace_path": f"{WORKSPACE_BASE}/gold/gold_fact_progress",
-        "depends_on": ["silver_dim_worker", "silver_dim_project"],
+        "depends_on": ["WakeCapDW_Silver_TimescaleDB"],
     },
     {
         "name": "gold_worker_location_assignments",
         "local_path": "migration_project/pipelines/gold/notebooks/gold_worker_location_assignments.py",
         "workspace_path": f"{WORKSPACE_BASE}/gold/gold_worker_location_assignments",
-        "depends_on": ["silver_dim_worker", "silver_dim_project"],
+        "depends_on": ["WakeCapDW_Silver_TimescaleDB"],
     },
     {
         "name": "gold_manager_assignment_snapshots",
         "local_path": "migration_project/pipelines/gold/notebooks/gold_manager_assignment_snapshots.py",
         "workspace_path": f"{WORKSPACE_BASE}/gold/gold_manager_assignment_snapshots",
-        "depends_on": ["silver_dim_worker", "silver_dim_project"],
+        "depends_on": ["WakeCapDW_Silver_TimescaleDB"],
     },
 ]
 
@@ -164,14 +154,14 @@ def create_workflow_job(client, deployed, cluster_id=None):
 
     Task Graph:
 
-    silver_dim_organization ─┬─> gold_fact_weather_observations
-    silver_dim_project ──────┼─> gold_fact_workers_history
-    silver_dim_worker ───────┼─> gold_fact_reported_attendance
-                             ├─> gold_fact_progress
-                             ├─> gold_worker_location_assignments
-                             └─> gold_manager_assignment_snapshots
+    WakeCapDW_Silver_TimescaleDB ─┬─> gold_fact_weather_observations
+    (consolidated silver layer)  ─┼─> gold_fact_workers_history
+                                  ├─> gold_fact_reported_attendance
+                                  ├─> gold_fact_progress
+                                  ├─> gold_worker_location_assignments
+                                  └─> gold_manager_assignment_snapshots
 
-    Silver notebooks run in parallel, gold notebooks run after their dependencies complete.
+    Silver notebook runs first, then all gold notebooks run in parallel after silver completes.
     """
     print("\n" + "=" * 60)
     print("CREATING WORKFLOW JOB")
