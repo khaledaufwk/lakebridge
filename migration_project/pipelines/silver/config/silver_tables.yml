@@ -1,6 +1,7 @@
 # Silver Layer Table Registry - WakeCapDW
 # ========================================
 # Generated: 2026-01-23
+# Updated: 2026-01-27 (Added silver_worker_status)
 # Source: wakecap_prod.raw (Bronze layer from TimescaleDB)
 # Target: wakecap_prod.silver
 #
@@ -9,6 +10,9 @@
 # - Column transformations
 # - Data quality expectations (3-tier: critical/business/advisory)
 # - Processing group for dependency ordering
+#
+# Note: silver_worker_status added for DBO.WorkerStatus parity
+#       (maps DelayReason → WorkerStatus terminology)
 # ========================================
 
 registry_version: '1.0'
@@ -67,6 +71,7 @@ processing_groups:
       - silver_department
       - silver_data_group
       - silver_delay_reason
+      - silver_worker_status  # Added: Maps DelayReason to WorkerStatus terminology (per stg.spDeltaSyncDimWorkerStatus)
       - silver_equipment
       - silver_obs
       - silver_package
@@ -499,6 +504,9 @@ tables:
         target: CreatedAt
       - source: UpdatedAt
         target: UpdatedAt
+      - source: LinkedUserId
+        target: LinkedUserId
+        comment: "User GUID for ApprovedBy resolution (People.LinkedUserId -> ResourceTimesheet.ApprovedBy)"
 
   - name: silver_crew
     source_bronze_table: timescale_crew
@@ -797,6 +805,52 @@ tables:
         target: CreatedAt
       - source: UpdatedAt
         target: UpdatedAt
+
+  # WorkerStatus: Same source as DelayReason but with business-friendly naming
+  # Converted from: stg.spDeltaSyncDimWorkerStatus
+  # Maps DelayReason terminology to WorkerStatus for DBO.WorkerStatus parity
+  - name: silver_worker_status
+    source_bronze_table: timescale_delayreason
+    primary_key_columns: [Id]
+    processing_group: project_children
+    transformation_type: soft_delete_filter
+    fk_validations:
+      - column: ProjectId
+        references: silver_project.ProjectId
+        type: left_join
+    expectations:
+      critical:
+        - "Id IS NOT NULL"
+      business:
+        - "ProjectId IS NOT NULL"
+        - "DeletedAt IS NULL"
+      advisory:
+        - "LENGTH(TRIM(COALESCE(ReasonCode, ''))) > 0"
+    columns:
+      - source: Id
+        target: WorkerStatusId
+      - source: Id
+        target: ExtDelayReasonID
+        comment: "Original DelayReason ID for traceability"
+      - source: ReasonCode
+        target: WorkerStatus
+        transform: "LEFT(TRIM(COALESCE(ReasonCode, '')), 100)"
+        comment: "Worker status code (from DelayReason.ReasonCode)"
+      - source: ReasonName
+        target: WorkerStatusName
+        transform: "LEFT(TRIM(COALESCE(ReasonName, '')), 255)"
+        comment: "Worker status description (from DelayReason.ReasonName)"
+      - source: ProjectId
+        target: ProjectId
+      - source: ProjectId
+        target: ExtProjectID
+        comment: "Original Project ID for traceability"
+      - source: CreatedAt
+        target: CreatedAt
+      - source: UpdatedAt
+        target: UpdatedAt
+      - source: DeletedAt
+        target: DeletedAt
 
   - name: silver_equipment
     source_bronze_table: timescale_equipment
@@ -1285,6 +1339,12 @@ tables:
         target: CreatedAt
       - source: UpdatedAt
         target: UpdatedAt
+      - source: DeletedAt
+        target: DeletedAt
+        comment: "Soft delete timestamp for MV_ResourceDevice_NoViolation filtering"
+      - source: ProjectId
+        target: ProjectId
+        comment: "Project ID for device assignment"
 
   - name: silver_workshift_resource_assignment
     source_bronze_table: timescale_workshiftresourceassignment
@@ -1354,7 +1414,7 @@ tables:
     primary_key_columns: [Id]
     processing_group: assignments
     transformation_type: soft_delete_filter
-    comment: "Large table (1.4M rows)"
+    comment: "Large table (1.4M rows) - expanded for Gold WorkerLocationAssignments"
     batch_size: 500000
     fk_validations:
       - column: ProjectId
@@ -1373,19 +1433,23 @@ tables:
         - "DeletedAt IS NULL"
     columns:
       - source: Id
-        target: ManualLocationAssignmentId
+        target: Id
       - source: ProjectId
         target: ProjectId
       - source: ResourceId
-        target: WorkerId
+        target: ResourceId
       - source: CrewId
         target: CrewId
       - source: ZoneId
         target: ZoneId
       - source: SpaceId
-        target: FloorId
+        target: SpaceId
       - source: LocationGroupId
         target: LocationGroupId
+      - source: From
+        target: DateFrom
+      - source: To
+        target: DateTo
       - source: DeletedAt
         target: DeletedAt
       - source: CreatedAt
@@ -1871,6 +1935,7 @@ tables:
     primary_key_columns: [Id]
     processing_group: facts
     transformation_type: fact_transform
+    comment: "Resource hours - expanded for Gold FactReportedAttendance"
     fk_validations:
       - column: PeopleId
         references: silver_worker.WorkerId
@@ -1882,13 +1947,17 @@ tables:
         - "PeopleId IS NOT NULL"
     columns:
       - source: Id
-        target: ResourceHoursId
+        target: Id
+      - source: ProjectId
+        target: ProjectId
       - source: PeopleId
-        target: WorkerId
+        target: PeopleId
       - source: Date
         target: Date
       - source: TotalHours
         target: TotalHours
+      - source: DeletedAt
+        target: DeletedAt
       - source: CreatedAt
         target: CreatedAt
       - source: UpdatedAt
@@ -1899,6 +1968,7 @@ tables:
     primary_key_columns: [Id]
     processing_group: facts
     transformation_type: fact_transform
+    comment: "Resource timesheet - expanded for Gold FactReportedAttendance"
     fk_validations:
       - column: ResourceId
         references: silver_worker.WorkerId
@@ -1914,7 +1984,25 @@ tables:
       - source: ProjectId
         target: ProjectId
       - source: ResourceId
-        target: WorkerId
+        target: ResourceId
+      - source: Day
+        target: Day
+      - source: ApprovedArrivalTime
+        target: ApprovedArrivalTime
+      - source: ApprovedLeaveTime
+        target: ApprovedLeaveTime
+      - source: ReportedAttendanceStatus
+        target: ReportedAttendanceStatus
+      - source: ApprovedAttendanceStatus
+        target: ApprovedAttendanceStatus
+      - source: ApprovedBy
+        target: ApprovedById
+      - source: TimesheetRemarksId
+        target: TimesheetRemarksId
+      - source: ApprovedSeconds
+        target: ApprovedSeconds
+      - source: OverTimeSeconds
+        target: OverTimeSeconds
       - source: CreatedAt
         target: CreatedAt
       - source: UpdatedAt
@@ -2014,6 +2102,7 @@ tables:
     primary_key_columns: [Id]
     processing_group: facts
     transformation_type: fact_transform
+    comment: "Approved hours segment - links to silver_fact_resource_approved_hours via ApprovalId"
     fk_validations:
       - column: ProjectId
         references: silver_project.ProjectId
@@ -2023,7 +2112,7 @@ tables:
         - "Id IS NOT NULL"
     columns:
       - source: Id
-        target: ResourceHoursSegmentId
+        target: Id
       - source: ProjectId
         target: ProjectId
       - source: ApprovalId
@@ -2502,3 +2591,213 @@ tables:
         target: CreatedAt
       - source: UpdatedAt
         target: UpdatedAt
+
+  # =====================================================
+  # WEATHER STATION TABLES
+  # Source: weather-station TimescaleDB database
+  # =====================================================
+
+  - name: silver_fact_weather_sensor
+    source_bronze_table: weather_weather_station_sensor
+    primary_key_columns: [id]
+    processing_group: facts
+    transformation_type: fact_transform
+    batch_size: 500000
+    comment: "Weather station sensor readings - matches ADF DeltaCopyWeatherStationSensor"
+    expectations:
+      critical:
+        - "id IS NOT NULL"
+      business:
+        - "project_id IS NOT NULL"
+    columns:
+      - source: id
+        target: WeatherSensorId
+      - source: network_id
+        target: NetworkId
+      - source: project_id
+        target: ProjectId
+      - source: generated_at
+        target: GeneratedAt
+      - source: gateway_received_at
+        target: GatewayReceivedAt
+      - source: wind_speed
+        target: WindSpeed
+      - source: rain_fall
+        target: Rainfall
+      - source: temperature
+        target: Temperature
+      - source: air_pressure
+        target: AtmosphericPressure
+      - source: pm25
+        target: PM25
+      - source: wind_direction
+        target: WindDirection
+      - source: pm10
+        target: PM10
+      - source: humidity
+        target: Humidity
+      - source: tsp
+        target: TSP
+      - source: h2s
+        target: H2S
+      - source: custom_sensor_4
+        target: CustomSensor4
+      - source: custom_sensor_5
+        target: CustomSensor5
+      - source: created_at
+        target: CreatedAt
+      - source: serial_no
+        target: SerialNo
+      - source: cumulative_rain_fall
+        target: RainfallCumulative
+      - source: co2
+        target: CO2
+      - source: so2
+        target: SO2
+      - source: co
+        target: CO
+
+  # =====================================================
+  # OBSERVATION DIMENSION TABLES
+  # Source: wakecap_observation TimescaleDB database
+  # These tables are derived from DISTINCT values in Observation table
+  # Matches ADF SyncDimensionsObservations pipeline
+  # =====================================================
+
+  - name: silver_observation_source
+    source_bronze_table: observation_observation
+    primary_key_columns: [ObservationSource]
+    processing_group: independent_dimensions
+    transformation_type: distinct_dimension
+    comment: "Observation sources - derived from DISTINCT Source values (ADF: SyncDimOSource)"
+    expectations:
+      critical:
+        - "ObservationSource IS NOT NULL"
+    derived_dimension:
+      source_column: Source
+      target_column: ObservationSource
+      transform: "LEFT(TRIM(Source), 50)"
+      add_columns:
+        - name: ExtSourceID
+          value: 19
+        - name: ObservationSourceID
+          expression: "ROW_NUMBER() OVER (ORDER BY Source)"
+    columns:
+      - source: Source
+        target: ObservationSource
+        transform: "LEFT(TRIM(Source), 50)"
+
+  - name: silver_observation_status
+    source_bronze_table: observation_observation
+    primary_key_columns: [ObservationStatus]
+    processing_group: independent_dimensions
+    transformation_type: distinct_dimension
+    comment: "Observation statuses - derived from DISTINCT Status values (ADF: SyncDimOStatus)"
+    expectations:
+      critical:
+        - "ObservationStatus IS NOT NULL"
+    derived_dimension:
+      source_column: Status
+      target_column: ObservationStatus
+      transform: "LEFT(TRIM(Status), 50)"
+      add_columns:
+        - name: ExtSourceID
+          value: 19
+        - name: ObservationStatusID
+          expression: "ROW_NUMBER() OVER (ORDER BY Status)"
+    columns:
+      - source: Status
+        target: ObservationStatus
+        transform: "LEFT(TRIM(Status), 50)"
+
+  - name: silver_observation_type
+    source_bronze_table: observation_observation
+    primary_key_columns: [ObservationType]
+    processing_group: independent_dimensions
+    transformation_type: distinct_dimension
+    comment: "Observation types - derived from DISTINCT Type values (ADF: SyncDimOType)"
+    expectations:
+      critical:
+        - "ObservationType IS NOT NULL"
+    derived_dimension:
+      source_column: Type
+      target_column: ObservationType
+      transform: "LEFT(TRIM(Type), 100)"
+      add_columns:
+        - name: ExtSourceID
+          value: 19
+        - name: ObservationTypeID
+          expression: "ROW_NUMBER() OVER (ORDER BY Type)"
+    columns:
+      - source: Type
+        target: ObservationType
+        transform: "LEFT(TRIM(Type), 100)"
+
+  - name: silver_observation_severity
+    source_bronze_table: observation_observation
+    primary_key_columns: [ObservationSeverity]
+    processing_group: independent_dimensions
+    transformation_type: distinct_dimension
+    comment: "Observation severities - derived from DISTINCT Severity values (ADF: SyncDimOSeverity)"
+    expectations:
+      critical:
+        - "ObservationSeverity IS NOT NULL"
+    derived_dimension:
+      source_column: Severity
+      target_column: ObservationSeverity
+      transform: "LEFT(TRIM(Severity), 50)"
+      add_columns:
+        - name: ExtSourceID
+          value: 19
+        - name: ObservationSeverityID
+          expression: "ROW_NUMBER() OVER (ORDER BY Severity)"
+    columns:
+      - source: Severity
+        target: ObservationSeverity
+        transform: "LEFT(TRIM(Severity), 50)"
+
+  - name: silver_observation_discriminator
+    source_bronze_table: observation_observation
+    primary_key_columns: [ObservationDiscriminator]
+    processing_group: independent_dimensions
+    transformation_type: distinct_dimension
+    comment: "Observation discriminators - derived from DISTINCT Discriminator values (ADF: SyncDimODiscriminator)"
+    expectations:
+      critical:
+        - "ObservationDiscriminator IS NOT NULL"
+    derived_dimension:
+      source_column: Discriminator
+      target_column: ObservationDiscriminator
+      transform: "LEFT(TRIM(Discriminator), 50)"
+      add_columns:
+        - name: ExtSourceID
+          value: 19
+        - name: ObservationDiscriminatorID
+          expression: "ROW_NUMBER() OVER (ORDER BY Discriminator)"
+    columns:
+      - source: Discriminator
+        target: ObservationDiscriminator
+        transform: "LEFT(TRIM(Discriminator), 50)"
+
+  - name: silver_observation_clinic_violation_status
+    source_bronze_table: observation_observation
+    primary_key_columns: [ObservationClinicViolationStatus]
+    processing_group: independent_dimensions
+    transformation_type: distinct_dimension
+    comment: "Observation clinic violation statuses - derived from DISTINCT ClinicViolationStatus values"
+    expectations:
+      critical:
+        - "ObservationClinicViolationStatus IS NOT NULL"
+    derived_dimension:
+      source_column: ClinicViolationStatus
+      target_column: ObservationClinicViolationStatus
+      transform: "LEFT(TRIM(ClinicViolationStatus), 50)"
+      add_columns:
+        - name: ExtSourceID
+          value: 19
+        - name: ObservationClinicViolationStatusID
+          expression: "ROW_NUMBER() OVER (ORDER BY ClinicViolationStatus)"
+    columns:
+      - source: ClinicViolationStatus
+        target: ObservationClinicViolationStatus
+        transform: "LEFT(TRIM(ClinicViolationStatus), 50)"

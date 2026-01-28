@@ -327,12 +327,34 @@ worker_lookup_df = worker_deduped.select(
     F.col("WorkerId").alias("dim_ExtWorkerID")  # Same as WorkerId for direct mapping
 )
 
-approved_by_lookup_df = worker_deduped.select(
-    F.col("WorkerId").alias("dim_ApprovedByWorkerID"),
-    F.col("WorkerId").cast("string").alias("dim_ApprovedByExtID")  # Cast to string to match UUID ApprovedById
-)
+# ApprovedBy lookup: Join ApprovedById (user GUID) to LinkedUserId to resolve to WorkerId
+# This matches ADF logic: LEFT JOIN People p ON rt.ApprovedBy = p.LinkedUserId
+# Note: ApprovedById in Silver is actually the ApprovedBy user GUID (renamed during Silver load)
+#
+# Check if LinkedUserId column exists (might not exist if Silver table wasn't rebuilt)
+worker_columns = [c.lower() for c in worker_deduped.columns]
+if "linkeduserid" in worker_columns:
+    print("[OK] LinkedUserId column found in silver_worker - using ADF-style lookup")
+    approved_by_window = Window.partitionBy("LinkedUserId").orderBy(F.lit(1))
+    approved_by_lookup_df = worker_deduped \
+        .filter(F.col("LinkedUserId").isNotNull()) \
+        .withColumn("_rn", F.row_number().over(approved_by_window)) \
+        .filter(F.col("_rn") == 1) \
+        .select(
+            F.col("WorkerId").alias("dim_ApprovedByWorkerID"),
+            F.col("LinkedUserId").cast("string").alias("dim_ApprovedByExtID")
+        )
+else:
+    # Fallback: LinkedUserId not available, use WorkerId directly (legacy behavior)
+    print("[WARN] LinkedUserId column not found - using legacy WorkerId lookup")
+    print("       Run Silver job with full refresh to add LinkedUserId column")
+    approved_by_lookup_df = worker_deduped.select(
+        F.col("WorkerId").alias("dim_ApprovedByWorkerID"),
+        F.col("WorkerId").cast("string").alias("dim_ApprovedByExtID")
+    )
 
 print(f"Worker dimension records: {worker_lookup_df.count()}")
+print(f"ApprovedBy lookup records: {approved_by_lookup_df.count()}")
 
 # Project dimension lookup
 # NOTE: silver_project_dw has ExtProjectID (UUID) that matches fact tables' ProjectId
@@ -386,9 +408,15 @@ print("=" * 60)
 print("STEP 4: Build Source 1 - Reported Attendance (ExtSourceID=15)")
 print("=" * 60)
 
-# Load and filter ResourceHours (not deleted)
+# Date range constants for filtering (matches ADF logic)
+DATE_MIN = "2000-01-01"
+DATE_MAX = "2100-01-01"
+
+# Load and filter ResourceHours (not deleted, valid date range)
+# ADF: WHERE "Date" BETWEEN '2000-01-01' AND '2100-01-01'
 rh_df = resource_hours_df \
     .filter(F.col("DeletedAt").isNull()) \
+    .filter(F.col("Date").between(DATE_MIN, DATE_MAX)) \
     .select(
         F.col("ProjectId").alias("rh_ProjectId"),
         F.col("PeopleId").alias("rh_PeopleId"),
@@ -396,9 +424,11 @@ rh_df = resource_hours_df \
         F.col("TotalHours").alias("TotalHours")
     )
 
-# Load ResourceTimesheet (DeletedAt column may not exist in Silver table)
+# Load ResourceTimesheet (valid date range)
+# ADF: WHERE "Day" BETWEEN '2000-01-01' AND '2100-01-01'
 # Note: TimesheetRemarks column doesn't exist in Silver - using NULL instead
 rt_df = resource_timesheet_df \
+    .filter(F.col("Day").between(DATE_MIN, DATE_MAX)) \
     .select(
         F.col("ProjectId").alias("rt_ProjectId"),
         F.col("ResourceId").alias("rt_ResourceId"),

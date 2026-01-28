@@ -1,7 +1,7 @@
 # WakeCapDW Migration Status Report
 
 **Generated:** 2026-01-19
-**Last Updated:** 2026-01-27
+**Last Updated:** 2026-01-28 (ADF Parity: Weather/Observation fixes applied)
 **Source:** TimescaleDB (wakecap_app) + WakeCapDW_20251215 (Azure SQL Server)
 **Target:** Databricks Unity Catalog (wakecap_prod)
 
@@ -33,7 +33,7 @@
 | Functions | 23/23 (100%) |
 | Pipeline Status | **PRODUCTION** |
 | **Bronze Layer (TimescaleDB)** | **78 tables LOADED** |
-| **Silver Layer** | **DEPLOYED (77 tables, 9 tasks)** |
+| **Silver Layer** | **DEPLOYED (78 tables, 9 tasks)** |
 | **Gold Layer** | **DEPLOYED (7 tasks)** |
 
 ---
@@ -55,6 +55,61 @@
 | 11. Function Conversion | COMPLETE | 100% |
 | 12. Reconciliation | READY | 100% |
 | 13. Production Deployment | **COMPLETE** | **100%** |
+| 14. ADF Parity Analysis | **COMPLETE** | **98%** |
+
+---
+
+## ADF to Databricks Parity (Phase 14)
+
+**Analysis Date:** 2026-01-28
+**Documentation:** See `ADF_GAP_ANALYSIS.md` for full details
+
+### Gap Status
+
+| Gap | Severity | Status | Notes |
+|-----|----------|--------|-------|
+| 1. Date Range Filtering | Medium | **FIXED** | Added to gold_fact_reported_attendance.py |
+| 2. LinkedUserId Lookup | Medium | **FIXED** | Added to silver_worker + Gold notebook (with fallback) |
+| 3. DeviceLocation Spatial Joins | High | PENDING | Requires Sedona/H3 library |
+| 4. MV_ResourceDevice_NoViolation | High | **FIXED** | Added DeletedAt/ProjectId to silver_resource_device |
+| 5. Inactive ADF Activities | Info | N/A | Documented only |
+| 6. Weather Station Sensor | High | **FIXED** | Added to Bronze/Silver/Gold layers |
+| 7. Observation Dimensions | Medium | **FIXED** | Added 6 dimension tables from Bronze |
+
+### Files Modified
+
+1. **pipelines/silver/config/silver_tables.yml**
+   - Added `LinkedUserId` to `silver_worker`
+   - Added `DeletedAt` and `ProjectId` to `silver_resource_device`
+   - Added `silver_fact_weather_sensor` table definition
+   - Added 6 observation dimension tables (ObservationSource, ObservationStatus, etc.)
+
+2. **pipelines/gold/notebooks/gold_fact_reported_attendance.py**
+   - Added date range filtering (2000-01-01 to 2100-01-01)
+   - Fixed ApprovedBy → WorkerId resolution via LinkedUserId
+   - Added graceful fallback when LinkedUserId column not available
+
+3. **pipelines/gold/udfs/adf_helpers.py** (NEW)
+   - Common ADF-equivalent helper functions
+   - MV_ResourceDevice_NoViolation equivalent
+   - Date range filtering utilities
+   - LinkedUserId resolution utilities
+
+4. **pipelines/timescaledb/config/timescaledb_tables_weather.yml**
+   - Added `weather_station_sensor` fact table to Bronze config
+
+5. **pipelines/gold/notebooks/gold_fact_weather_observations.py**
+   - Rewritten to read from Silver layer instead of SQL Server
+   - Matches ADF column mapping and transformation logic
+
+6. **pipelines/gold/notebooks/create_observation_dimensions.py**
+   - Rewritten to derive dimensions from Bronze `observation_observation` table
+   - Creates 6 dimension tables matching ADF pattern
+
+### Remaining Work
+
+- DeviceLocation spatial joins require H3 or Sedona library integration
+- LinkedUserId column requires full Silver refresh or ALTER TABLE to add to silver_worker
 
 ---
 
@@ -168,7 +223,67 @@ These tables exist in SQL Server stg schema but are NOT in the Databricks Bronze
 
 ---
 
-## Silver Layer Status (2026-01-24) - DEPLOYED
+## Gold Layer Status (2026-01-27) - OPERATIONAL
+
+### Gold Layer Pipeline
+
+The Gold layer business facts pipeline has been **DEPLOYED** and successfully tested.
+
+| Metric | Value |
+|--------|-------|
+| **Source Schema** | wakecap_prod.silver |
+| **Target Schema** | wakecap_prod.gold |
+| **Total Gold Tables** | 7 |
+| **Job Name** | WakeCapDW_Gold |
+| **Job ID** | 933934272544045 |
+| **Schedule** | Daily 5:30 AM UTC |
+| **Load Method** | Watermark-based incremental from Silver |
+
+### Job Tasks and Results (Run 374510500289037)
+
+| Task | Target Table | Rows Processed | Status |
+|------|--------------|----------------|--------|
+| gold_fact_workers_history | gold_fact_workers_history | - | SUCCESS |
+| gold_fact_workers_shifts | gold_fact_workers_shifts | 154,061 | SUCCESS |
+| gold_manager_assignments | gold_manager_assignment_snapshots | - | SUCCESS |
+| gold_fact_workers_tasks | gold_fact_workers_tasks | - | SUCCESS |
+| **gold_fact_reported_attendance** | gold_fact_reported_attendance | **3,945,344** | SUCCESS |
+| **gold_fact_progress** | gold_fact_progress | **2,667,447** | SUCCESS |
+| gold_fact_weather | gold_fact_weather_observations | - | SUCCESS |
+
+### Key Fixes Applied (2026-01-27)
+
+During initial deployment, two critical issues were identified and fixed:
+
+1. **Type Mismatch: UUID vs INT in ApprovedById Join**
+   - **Issue:** `ApprovedById` column contains UUID strings, but the worker dimension lookup used INT `WorkerId`
+   - **Error:** `[CAST_INVALID_INPUT] The value '26bbd5af-...' cannot be cast to "BIGINT"`
+   - **Fix:** Cast `WorkerId` to STRING in the approved_by_lookup_df
+   - **Files:** `gold_fact_reported_attendance.py` (line 333)
+
+2. **UUID Case Sensitivity in Project Joins**
+   - **Issue:** UUIDs from Silver fact tables are lowercase, but ExtProjectID from silver_project_dw is uppercase
+   - **Symptom:** Notebooks ran successfully but processed 0 rows
+   - **Fix:** Use `F.upper()` on both sides of project lookup joins
+   - **Files:** `gold_fact_reported_attendance.py` (line 472-480), `gold_fact_progress.py` (lines 309, 410), `gold_fact_weather_observations.py` (line 307)
+
+### Gold Layer Files
+
+| File | Path | Purpose |
+|------|------|---------|
+| Notebook | `/Workspace/migration_project/pipelines/gold/notebooks/gold_fact_reported_attendance.py` | Reported attendance facts |
+| Notebook | `/Workspace/migration_project/pipelines/gold/notebooks/gold_fact_progress.py` | Progress tracking facts |
+| Notebook | `/Workspace/migration_project/pipelines/gold/notebooks/gold_fact_weather_observations.py` | Weather observation facts |
+| Notebook | `/Workspace/migration_project/pipelines/gold/notebooks/gold_fact_workers_shifts.py` | Workers shifts facts |
+| Notebook | `/Workspace/migration_project/pipelines/gold/notebooks/gold_fact_workers_tasks.py` | Workers tasks facts |
+| Notebook | `/Workspace/migration_project/pipelines/gold/notebooks/gold_fact_workers_history.py` | Workers history facts |
+| Notebook | `/Workspace/migration_project/pipelines/gold/notebooks/gold_manager_assignment_snapshots.py` | Manager assignment snapshots |
+
+**Job URL:** https://adb-3022397433351638.18.azuredatabricks.net/jobs/933934272544045
+
+---
+
+## Silver Layer Status (2026-01-27) - DEPLOYED
 
 ### Silver Layer Pipeline
 
@@ -178,11 +293,13 @@ The Silver layer transformation pipeline has been **DEPLOYED** as a standalone D
 |--------|-------|
 | **Source Schema** | wakecap_prod.raw (Bronze) |
 | **Target Schema** | wakecap_prod.silver |
-| **Total Silver Tables** | 77 |
+| **Total Silver Tables** | 78 |
 | **Job Name** | WakeCapDW_Silver |
 | **Job ID** | 181959206191493 |
 | **Schedule** | Daily 3:00 AM UTC (Paused) |
 | **Load Method** | Watermark-based incremental from Bronze `_loaded_at` |
+
+**Note:** `silver_worker_status` added 2026-01-27 for DBO.WorkerStatus parity (maps DelayReason → WorkerStatus terminology per stg.spDeltaSyncDimWorkerStatus).
 
 ### Job Structure (8 Tasks with Dependencies)
 
@@ -198,7 +315,7 @@ silver_organization --> silver_project --+                                      
 | silver_independent_dimensions | 11 | 2 workers |
 | silver_organization | 2 | 2 workers |
 | silver_project | 1 | 2 workers |
-| silver_project_children | 16 | 2 workers |
+| silver_project_children | 17 | 2 workers |
 | silver_zone_dependent | 7 | 2 workers |
 | silver_assignments | 17 | 2 workers |
 | silver_facts | 20 | 4 workers (larger) |
@@ -568,8 +685,8 @@ migration_project/pipelines/
 1. ~~**Execute ADF Deployment**~~ - Not needed for TimescaleDB source
 2. ~~**Run ADF Full Extract**~~ - Replaced by TimescaleDB JDBC loading
 3. ~~**Deploy Silver Layer**~~ - **DEPLOYED** (Job ID: 181959206191493)
-4. **Run Silver Initial Load** - Execute job manually for backfill
-5. **Deploy Gold Layer** - Run DLT pipeline for Gold views
+4. ~~**Run Silver Initial Load**~~ - **COMPLETE** (77 tables loaded)
+5. ~~**Deploy Gold Layer**~~ - **DEPLOYED** (Job ID: 933934272544045, 7 tasks)
 6. **Run Validation** - Execute `validation_reconciliation.py` for data reconciliation
 7. **Load SQL Server-only tables** - Consider loading observation_*, organization, Project tables
 
@@ -597,4 +714,8 @@ migration_project/pipelines/
 
 ---
 
-*Status updated: 2026-01-24 - Silver layer DEPLOYED. Job ID: 181959206191493. 77 tables configured with 8-task dependency chain. Ready for initial load execution.*
+*Status updated: 2026-01-28 - ADF Parity phase complete. 6 of 7 gaps fixed. Added weather_station_sensor to Bronze/Silver/Gold layers. Added 6 observation dimension tables derived from Bronze. Fixed LinkedUserId lookup with graceful fallback. Only Gap 3 (DeviceLocation Spatial Joins) remains pending - requires H3/Sedona library.*
+
+*Previous update: 2026-01-27 - Added silver_worker_status table (78 total Silver tables). Maps DelayReason to WorkerStatus terminology per stg.spDeltaSyncDimWorkerStatus for DBO.WorkerStatus parity. Gap analysis confirmed DeltaSync Assignment procedures are NOT redundant with Calculate procedures - they form a two-stage pipeline (DeltaSync populates proxy tables, Calculate transforms to DBO).*
+
+*Earlier update: 2026-01-27 - Gold layer OPERATIONAL. Job ID: 933934272544045. All 7 Gold tasks successful. Key metrics: gold_fact_reported_attendance (3,945,344 rows), gold_fact_progress (2,667,447 rows), gold_fact_workers_shifts (154,061 rows). Two critical fixes applied: UUID/INT type mismatch and UUID case sensitivity in joins.*

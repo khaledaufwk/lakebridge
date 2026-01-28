@@ -88,6 +88,52 @@ tables:
     is_full_load: true  # Currently empty table
     comment: "Calculated weather statistics - currently empty"
 
+  # =====================================================
+  # weather_station_sensor - Main fact table (ADF: DeltaCopyWeatherStationSensor)
+  # This is the primary weather sensor data table synced hourly by ADF
+  # Source columns from ADF query:
+  #   id, network_id, project_id, generated_at, gateway_received_at,
+  #   wind_speed, rain_fall, temperature, air_pressure, pm25, wind_direction,
+  #   pm10, humidity, tsp, h2s, custom_sensor_4, custom_sensor_5,
+  #   created_at, serial_no, cumulative_rain_fall, co2, so2, co
+  # =====================================================
+  - source_table: weather_station_sensor
+    primary_key_columns: [id]
+    watermark_column: created_at
+    watermark_expression: "COALESCE(\"created_at\", '1900-01-01')"
+    category: facts
+    is_full_load: false
+    fetch_size: 100000
+    batch_size: 200000
+    custom_query: |
+      SELECT
+        id,
+        network_id,
+        project_id,
+        generated_at,
+        gateway_received_at,
+        wind_speed,
+        rain_fall,
+        temperature,
+        air_pressure,
+        pm25,
+        wind_direction,
+        pm10,
+        humidity,
+        tsp,
+        h2s,
+        custom_sensor_4,
+        custom_sensor_5,
+        created_at,
+        serial_no,
+        cumulative_rain_fall,
+        co2,
+        so2,
+        co
+      FROM public.weather_station_sensor
+      WHERE COALESCE("created_at", '1900-01-01') > '{watermark}'
+    comment: "Weather station sensor readings - main fact table synced from ADF DeltaCopyWeatherStationSensor"
+
 excluded_tables:
   - source_table: __EFMigrationsHistory
     reason: "EF Core migrations history - not needed"
