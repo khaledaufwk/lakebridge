@@ -1,6 +1,7 @@
 # ADF to Databricks Gap Analysis
 
 **Generated:** 2026-01-28
+**Last Updated:** 2026-01-28 (Gap 4 corrected: MV uses window function, not DeletedAt)
 **Source:** `Wakecap-ADF-Prod24` ARM Template Export
 **Target:** Databricks Unity Catalog (`wakecap_prod`)
 
@@ -14,7 +15,7 @@ Analysis of the live ADF pipelines versus the current Databricks implementation 
 |-----|----------|--------|----------------|
 | 1. Date Range Filtering | Medium | **FIXED** | Added to gold_fact_reported_attendance.py |
 | 2. ResourceTimesheet LinkedUserId Lookup | Medium | **FIXED** | Added LinkedUserId to silver_worker, fixed Gold lookup |
-| 3. DeviceLocation Spatial Joins | High | Missing | Implement in Gold (requires Sedona/H3) |
+| 3. DeviceLocation Spatial Joins | High | **IN PROGRESS** | H3 notebooks deployed, pending Bronze geometry data |
 | 4. SyncFacts MV_ResourceDevice_NoViolation | High | **CORRECTED** | No DeletedAt/ProjectId needed - MV uses window function for violation detection |
 | 5. Inactive ADF Activities | Info | N/A | Document only |
 | 6. Weather Station Sensor (SyncFacts) | High | **FIXED** | Added weather_station_sensor to Bronze/Silver/Gold |

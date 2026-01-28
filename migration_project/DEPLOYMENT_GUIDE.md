@@ -689,6 +689,38 @@ UNION ALL
 SELECT 'gold_manager_assignment_snapshots', COUNT(*) FROM wakecap_prod.gold.gold_manager_assignment_snapshots;
 ```
 
+### 3.5 Gold Layer Helper Functions
+
+Helper functions for ADF-equivalent logic are available at:
+- **Local:** `migration_project/pipelines/gold/udfs/adf_helpers.py`
+- **Databricks:** `/Workspace/migration_project/pipelines/gold/udfs/adf_helpers`
+
+**Key Functions:**
+
+| Function | Description |
+|----------|-------------|
+| `get_resource_device_no_violation()` | Equivalent to PostgreSQL `MV_ResourceDevice_NoViolation` - uses window function to filter overlapping device assignments |
+| `filter_valid_date()` | ADF date range filtering (2000-01-01 to 2100-01-01) |
+| `get_worker_by_linked_user_id()` | Resolve ApprovedBy user GUID to WorkerId via LinkedUserId |
+
+**Important:** The `MV_ResourceDevice_NoViolation` equivalent does NOT use `DeletedAt IS NULL` filtering. The PostgreSQL MV uses a window function to detect overlapping device assignments (when previous `UnAssignedAt` > current `AssignedAt`).
+
+### 3.6 H3 Spatial Joins (DeviceLocation Zone Assignment)
+
+H3 hexagonal spatial indexing replaces ADF's PostGIS `ST_CONTAINS` for zone assignment:
+
+**Notebooks:**
+- `silver_zone_h3_coverage.py` - Pre-computes H3 cell coverage for all zones
+- `gold_fact_device_location_zone.py` - Joins device locations to zones via H3 index
+- `h3_udfs.py` - H3 UDF definitions
+
+**Workspace Paths:**
+- `/Workspace/migration_project/pipelines/silver/notebooks/silver_zone_h3_coverage`
+- `/Workspace/migration_project/pipelines/gold/notebooks/gold_fact_device_location_zone`
+- `/Workspace/migration_project/pipelines/gold/udfs/h3_udfs`
+
+**Status:** Deployed. Pending Bronze Zone geometry data.
+
 ---
 
 ## Phase 6: Validation
@@ -897,6 +929,9 @@ For issues with this migration:
 
 | Date | Update |
 |------|--------|
+| 2026-01-28 | **MV_ResourceDevice_NoViolation FIX** - Corrected to use window function instead of DeletedAt filtering |
+| 2026-01-28 | **H3 Spatial Joins DEPLOYED** - Added silver_zone_h3_coverage and gold_fact_device_location_zone notebooks |
+| 2026-01-28 | Added Gold Helper Functions section (adf_helpers.py) with ADF-equivalent utilities |
 | 2026-01-27 | **Gold layer DEPLOYED** - Job ID 933934272544045 with 7 tasks |
 | 2026-01-27 | **IMPORTANT:** Added Production Jobs section - all work must go to Bronze/Silver/Gold jobs |
 | 2026-01-27 | Consolidated gold notebooks into single WakeCapDW_Gold job |
@@ -910,4 +945,4 @@ For issues with this migration:
 | 2026-01-22 | Phase 1 (Bronze Layer) marked COMPLETE - 78 tables loaded |
 | 2026-01-22 | Updated TimescaleDB ingestion documentation |
 
-*Last updated: 2026-01-27*
+*Last updated: 2026-01-28*

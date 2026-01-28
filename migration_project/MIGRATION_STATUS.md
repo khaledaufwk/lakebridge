@@ -1,7 +1,7 @@
 # WakeCapDW Migration Status Report
 
 **Generated:** 2026-01-19
-**Last Updated:** 2026-01-28 (ADF Parity: Weather/Observation fixes applied)
+**Last Updated:** 2026-01-28 (MV_ResourceDevice_NoViolation fix - uses window function, not DeletedAt)
 **Source:** TimescaleDB (wakecap_app) + WakeCapDW_20251215 (Azure SQL Server)
 **Target:** Databricks Unity Catalog (wakecap_prod)
 
@@ -91,9 +91,9 @@
    - Fixed ApprovedBy → WorkerId resolution via LinkedUserId
    - Added graceful fallback when LinkedUserId column not available
 
-3. **pipelines/gold/udfs/adf_helpers.py** (NEW)
+3. **pipelines/gold/udfs/adf_helpers.py** (UPDATED)
    - Common ADF-equivalent helper functions
-   - MV_ResourceDevice_NoViolation equivalent
+   - **FIXED:** `get_resource_device_no_violation()` now uses correct window function logic
    - Date range filtering utilities
    - LinkedUserId resolution utilities
 

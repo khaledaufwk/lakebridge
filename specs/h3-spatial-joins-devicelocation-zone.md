@@ -1011,7 +1011,25 @@ The notebook uses watermark-based incremental loading:
 
 ---
 
+## Deployment Status
+
+**Status:** DEPLOYED TO DATABRICKS (2026-01-28)
+
+| Component | Workspace Path | Status |
+|-----------|----------------|--------|
+| H3 UDFs | `/Workspace/migration_project/pipelines/gold/udfs/h3_udfs` | Deployed |
+| Zone H3 Coverage | `/Workspace/migration_project/pipelines/silver/notebooks/silver_zone_h3_coverage` | Deployed |
+| Device Location Zone | `/Workspace/migration_project/pipelines/gold/notebooks/gold_fact_device_location_zone` | Deployed |
+| ADF Helpers | `/Workspace/migration_project/pipelines/gold/udfs/adf_helpers` | Updated (window function fix) |
+
+**Pending:**
+- Bronze Zone table geometry data (CoordinatesWKT column) needs to be loaded
+- Run zone H3 coverage notebook to populate `silver_zone_h3_coverage` table
+- Add Gold notebook to WakeCapDW_Gold job schedule
+
+---
+
 *Plan created: 2026-01-28*
+*Deployed: 2026-01-28*
 *Task Type: migration*
 *Complexity: complex*
-*Estimated Effort: 2-3 days*
