@@ -29,16 +29,24 @@ def get_resource_device_no_violation(spark, catalog="wakecap_prod", schema="silv
     """
     Equivalent to PostgreSQL MV_ResourceDevice_NoViolation materialized view.
 
-    Returns active device-worker assignments for joining with DeviceLocation.
+    Returns non-violating device-worker assignments for joining with DeviceLocation.
+    A "violation" occurs when a device has overlapping assignments (previous UnAssignedAt > current AssignedAt).
 
-    Original ADF refreshes this view before DeltaCopyAssetLocation:
-        REFRESH MATERIALIZED VIEW public."MV_ResourceDevice_NoViolation";
+    Original PostgreSQL MV definition:
+        SELECT t."ResourceId", t."DeviceId", t."AssignedAt", t."UnAssignedAt", t."Violation"
+        FROM (
+            SELECT "ResourceDevice"."ResourceId", "ResourceDevice"."DeviceId",
+                   "ResourceDevice"."AssignedAt", "ResourceDevice"."UnAssignedAt",
+                   CASE WHEN MAX(COALESCE("ResourceDevice"."UnAssignedAt", '2100-01-01'))
+                        OVER (PARTITION BY "ResourceDevice"."DeviceId"
+                              ORDER BY "ResourceDevice"."AssignedAt"
+                              ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) > "ResourceDevice"."AssignedAt"
+                        THEN 1 ELSE NULL END AS "Violation"
+            FROM "ResourceDevice"
+        ) t
+        WHERE t."Violation" IS NULL;
 
-    Usage in ADF DeltaCopyAssetLocation:
-        INNER JOIN public."MV_ResourceDevice_NoViolation" da
-            ON da."DeviceId" = dl."DeviceId"
-            AND dl."GeneratedAt" >= da."AssignedAt"
-            AND (dl."GeneratedAt" < da."UnAssignedAt" OR da."UnAssignedAt" IS NULL)
+    NOTE: The MV does NOT use DeletedAt or ProjectId columns - these do not exist in the source.
 
     Args:
         spark: SparkSession
@@ -46,17 +54,24 @@ def get_resource_device_no_violation(spark, catalog="wakecap_prod", schema="silv
         schema: Schema name (default: silver)
 
     Returns:
-        DataFrame with columns: DeviceId, WorkerId, ProjectId, AssignedAt, UnassignedAt
+        DataFrame with columns: DeviceId, WorkerId, AssignedAt, UnassignedAt (non-violating assignments only)
     """
     return spark.sql(f"""
-        SELECT
-            DeviceId,
-            WorkerId,
-            ProjectId,
-            AssignedAt,
-            UnassignedAt
-        FROM {catalog}.{schema}.silver_resource_device
-        WHERE DeletedAt IS NULL
+        SELECT DeviceId, WorkerId, AssignedAt, UnassignedAt
+        FROM (
+            SELECT
+                DeviceId,
+                WorkerId,
+                AssignedAt,
+                UnassignedAt,
+                CASE WHEN MAX(COALESCE(UnassignedAt, TIMESTAMP '2100-01-01'))
+                     OVER (PARTITION BY DeviceId
+                           ORDER BY AssignedAt
+                           ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) > AssignedAt
+                     THEN 1 ELSE NULL END AS Violation
+            FROM {catalog}.{schema}.silver_resource_device
+        )
+        WHERE Violation IS NULL
     """)
 
 

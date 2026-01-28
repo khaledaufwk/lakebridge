@@ -15,7 +15,7 @@ Analysis of the live ADF pipelines versus the current Databricks implementation 
 | 1. Date Range Filtering | Medium | **FIXED** | Added to gold_fact_reported_attendance.py |
 | 2. ResourceTimesheet LinkedUserId Lookup | Medium | **FIXED** | Added LinkedUserId to silver_worker, fixed Gold lookup |
 | 3. DeviceLocation Spatial Joins | High | Missing | Implement in Gold (requires Sedona/H3) |
-| 4. SyncFacts MV_ResourceDevice_NoViolation | High | **FIXED** | Added DeletedAt/ProjectId to silver_resource_device |
+| 4. SyncFacts MV_ResourceDevice_NoViolation | High | **CORRECTED** | No DeletedAt/ProjectId needed - MV uses window function for violation detection |
 | 5. Inactive ADF Activities | Info | N/A | Document only |
 | 6. Weather Station Sensor (SyncFacts) | High | **FIXED** | Added weather_station_sensor to Bronze/Silver/Gold |
 | 7. Observation Dimensions (SyncDimensionsObservations) | Medium | **FIXED** | Added 6 dimension tables from observation Bronze |
@@ -307,34 +307,70 @@ Before syncing DeviceLocation, ADF refreshes a PostgreSQL materialized view:
 REFRESH MATERIALIZED VIEW public."MV_ResourceDevice_NoViolation";
 ```
 
-This view provides a clean, deduplicated list of device-to-worker assignments at any point in time.
+### Actual MV Definition (Verified 2026-01-28)
+
+The materialized view uses a **window function** to detect overlapping device assignments, NOT DeletedAt filtering:
+
+```sql
+SELECT t."ResourceId", t."DeviceId", t."AssignedAt", t."UnAssignedAt", t."Violation"
+FROM (
+    SELECT "ResourceDevice"."ResourceId", "ResourceDevice"."DeviceId",
+           "ResourceDevice"."AssignedAt", "ResourceDevice"."UnAssignedAt",
+           CASE WHEN (max(COALESCE("ResourceDevice"."UnAssignedAt", '2100-01-01'::timestamp))
+                OVER (PARTITION BY "ResourceDevice"."DeviceId"
+                      ORDER BY "ResourceDevice"."AssignedAt"
+                      ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) > "ResourceDevice"."AssignedAt")
+                THEN 1 ELSE NULL::integer END AS "Violation"
+    FROM "ResourceDevice"
+) t
+WHERE (t."Violation" IS NULL);
+```
+
+**Key Points:**
+- The MV contains: `ResourceId`, `DeviceId`, `AssignedAt`, `UnAssignedAt`, `Violation`
+- **NO** `DeletedAt` column - the MV does NOT filter by deletion status
+- **NO** `ProjectId` column - project is not part of this view
+- The "violation" is detected when a device has overlapping assignments (previous UnAssignedAt > current AssignedAt)
+- Only non-violating (clean) assignments are included
 
 ### Databricks Status
 
-**Not implemented.** The Silver layer has `silver_resource_device` but no equivalent materialized/cached view for joining.
+**Existing implementation is sufficient.** The Silver layer `silver_resource_device` table already has:
+- `DeviceId`
+- `WorkerId` (equivalent to ResourceId)
+- `AssignedAt`
+- `UnassignedAt`
 
 ### Recommendation
 
-Create a Silver-layer view or Gold-layer CTE that replicates this logic:
+Create a Databricks equivalent view/CTE using the same window function logic:
 
 ```python
-# In gold notebooks that need device-worker mapping
 def get_resource_device_no_violation(spark):
     """
     Equivalent to MV_ResourceDevice_NoViolation
-    Returns active device-worker assignments
+    Filters out overlapping device assignments using window function
     """
     return spark.sql("""
-        SELECT
-            DeviceId,
-            WorkerId,
-            ProjectId,
-            AssignedAt,
-            UnassignedAt
-        FROM wakecap_prod.silver.silver_resource_device
-        WHERE DeletedAt IS NULL
+        SELECT ResourceId, DeviceId, AssignedAt, UnAssignedAt
+        FROM (
+            SELECT
+                WorkerId AS ResourceId,
+                DeviceId,
+                AssignedAt,
+                UnassignedAt AS UnAssignedAt,
+                CASE WHEN MAX(COALESCE(UnassignedAt, TIMESTAMP '2100-01-01'))
+                     OVER (PARTITION BY DeviceId
+                           ORDER BY AssignedAt
+                           ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) > AssignedAt
+                     THEN 1 ELSE NULL END AS Violation
+            FROM wakecap_prod.silver.silver_resource_device
+        )
+        WHERE Violation IS NULL
     """)
 ```
+
+**Note:** The original Gap 4 "fix" that added DeletedAt/ProjectId columns was incorrect. These columns do not exist in the TimescaleDB ResourceDevice table or the MV_ResourceDevice_NoViolation view. The columns have been removed from silver_tables.yml.
 
 ---
 
@@ -517,29 +553,20 @@ approved_by_lookup_df = worker_deduped \
     )
 ```
 
-### Gap 4: MV_ResourceDevice_NoViolation - FIXED
+### Gap 4: MV_ResourceDevice_NoViolation - CORRECTED
 
-**File:** `pipelines/silver/config/silver_tables.yml`
+**Original (Incorrect) Analysis:** Assumed the MV filtered by `DeletedAt IS NULL` and needed `ProjectId`.
 
-Added `DeletedAt` and `ProjectId` columns to `silver_resource_device`:
-```yaml
-- source: DeletedAt
-  target: DeletedAt
-  comment: "Soft delete timestamp for MV_ResourceDevice_NoViolation filtering"
-- source: ProjectId
-  target: ProjectId
-  comment: "Project ID for device assignment"
-```
+**Actual Behavior (Verified 2026-01-28):** The PostgreSQL MV uses a **window function** to detect overlapping device assignments:
+- It computes a "Violation" flag when previous assignment's `UnAssignedAt` overlaps with current `AssignedAt`
+- It filters to only non-violating (clean) assignments
+- **NO** `DeletedAt` column exists in ResourceDevice table or the MV
+- **NO** `ProjectId` column exists in the MV
 
-The equivalent view can be created as:
-```python
-def get_resource_device_no_violation(spark):
-    return spark.sql("""
-        SELECT DeviceId, WorkerId, ProjectId, AssignedAt, UnassignedAt
-        FROM wakecap_prod.silver.silver_resource_device
-        WHERE DeletedAt IS NULL
-    """)
-```
+**Correction Applied:**
+- Removed invalid `DeletedAt` and `ProjectId` columns from `silver_resource_device` config
+- Existing Silver table columns (DeviceId, WorkerId, AssignedAt, UnassignedAt) are sufficient
+- Databricks equivalent view should use window function logic (see Gap 4 section above)
 
 ### Gap 3: DeviceLocation Spatial Joins - NOT IMPLEMENTED
 

@@ -85,6 +85,7 @@ processing_groups:
     description: "Tables that depend on floor/zone hierarchy"
     tables:
       - silver_zone
+      - silver_zone_h3_coverage  # H3 spatial index for zone polygons
       - silver_obs_current
       - silver_workshift_day
       - silver_workshift_schedule
@@ -1339,12 +1340,9 @@ tables:
         target: CreatedAt
       - source: UpdatedAt
         target: UpdatedAt
-      - source: DeletedAt
-        target: DeletedAt
-        comment: "Soft delete timestamp for MV_ResourceDevice_NoViolation filtering"
-      - source: ProjectId
-        target: ProjectId
-        comment: "Project ID for device assignment"
+      # NOTE: DeletedAt and ProjectId columns do NOT exist in TimescaleDB source (ResourceDevice table)
+      # These were incorrectly added for ADF parity Gap 4 (MV_ResourceDevice_NoViolation)
+      # The source table only has: Id, ResourceId, DeviceId, AssignedAt, UnAssignedAt, CreatedAt, UpdatedAt, Signature, ActionTime, SrcId
 
   - name: silver_workshift_resource_assignment
     source_bronze_table: timescale_workshiftresourceassignment
@@ -2801,3 +2799,29 @@ tables:
       - source: ClinicViolationStatus
         target: ObservationClinicViolationStatus
         transform: "LEFT(TRIM(ClinicViolationStatus), 50)"
+
+  # =====================================================
+  # H3 SPATIAL INDEX TABLES
+  # =====================================================
+
+  - name: silver_zone_h3_coverage
+    source_bronze_table: null  # Computed from silver_zone
+    primary_key_columns: [ZoneId, h3_index]
+    processing_group: zone_dependent
+    transformation_type: computed
+    comment: "H3 hexagonal cell coverage for zones - enables efficient spatial joins"
+    expectations:
+      critical:
+        - "ZoneId IS NOT NULL"
+        - "h3_index IS NOT NULL"
+    columns:
+      - source: ZoneId
+        target: ZoneId
+      - source: FloorId
+        target: FloorId
+      - source: ProjectId
+        target: ProjectId
+      - source: h3_index
+        target: h3_index
+      - source: h3_resolution
+        target: h3_resolution
